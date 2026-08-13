@@ -1,0 +1,16 @@
+[package]
+name = "api-tester-events"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+api-tester-domain.workspace = true
+api-tester-ports.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

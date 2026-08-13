@@ -1,0 +1,29 @@
+[package]
+name = "api-tester-capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+api-tester-domain.workspace = true
+api-tester-ports.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+api-tester-events.workspace = true
+api-tester-storage.workspace = true
+api-tester-test-support.workspace = true
+async-trait.workspace = true
+criterion.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+[[bench]]
+name = "ingest"
+harness = false
+
+[lints]
+workspace = true

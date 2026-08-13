@@ -1,0 +1,40 @@
+#!/bin/sh
+# gitleaks pre-commit hook.
+# Blocks commits that contain secrets in staged changes.
+#
+# Enabled by pointing git at this directory:
+#   git config core.hooksPath .githooks
+#
+# gitleaks is resolved from PATH first, then from a winget install location.
+
+set -u
+
+GITLEAKS=""
+
+if command -v gitleaks >/dev/null 2>&1; then
+    GITLEAKS="gitleaks"
+else
+    for base in "$HOME/AppData/Local/Microsoft/WinGet/Packages" "$LOCALAPPDATA/Microsoft/WinGet/Packages"; do
+        if [ -n "${base-}" ] && [ -d "$base" ]; then
+            found=$(find "$base" -path '*Gitleaks*' -iname gitleaks.exe 2>/dev/null | head -n 1)
+            if [ -n "$found" ]; then
+                GITLEAKS="$found"
+                break
+            fi
+        fi
+    done
+fi
+
+if [ -z "$GITLEAKS" ]; then
+    echo "gitleaks: executable not found; commit allowed but secrets are not scanned"
+    exit 0
+fi
+
+"$GITLEAKS" protect --staged --config .gitleaks.toml
+status=$?
+if [ "$status" -ne 0 ]; then
+    echo "gitleaks: secrets detected in staged changes; fix or allowlist them before committing"
+    exit "$status"
+fi
+
+exit 0

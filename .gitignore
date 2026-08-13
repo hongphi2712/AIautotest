@@ -1,0 +1,44 @@
+# Rust build
+/target/
+*.pdb
+
+# Legacy Python (kept local only, not part of the Rust product)
+*.py
+*.py[cod]
+*$py.class
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pyvenv
+venv/
+.venv/
+pyproject.toml
+/src/
+/tests/
+Makefile
+scripts/
+quick.bat
+config.json
+config.example.json
+*.db
+*.sqlite
+certs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local tooling (not part of the product)
+.opencode/
+.commandcode/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

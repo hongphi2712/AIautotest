@@ -1,0 +1,426 @@
+{
+  "project": "api-auto-tester",
+  "plan": "python-to-rust-full-rewrite",
+  "status": "phase_2_completed",
+  "updated": "2026-08-13",
+  "completed_phases": [
+    1,
+    2
+  ],
+  "next_phase": 3,
+  "decisions": {
+    "target_language": "Rust",
+    "migration_mode": "full-rewrite-with-python-reference",
+    "python_reference": "read-only until Rust cutover",
+    "rust_toolchain": "stable-x86_64-pc-windows-msvc",
+    "proxy_host": "127.0.0.1",
+    "proxy_port": 8080,
+    "dashboard_port": 2712,
+    "documentation_format": "structured configuration and source comments; no Markdown"
+  },
+  "target_workspace": {
+    "workspace_manifest": "Cargo.toml",
+    "applications": {
+      "initial": [
+        "apps/api-tester-cli",
+        "apps/api-tester-server"
+      ],
+      "scale_out": [
+        "apps/api-tester-worker"
+      ]
+    },
+    "crates": [
+      "domain",
+      "application",
+      "ports",
+      "config",
+      "proxy",
+      "capture",
+      "storage",
+      "analysis",
+      "query",
+      "workflow",
+      "scanner",
+      "skills",
+      "auth",
+      "reporting",
+      "dashboard",
+      "events",
+      "telemetry",
+      "test-support"
+    ],
+    "schemas": [
+      "http-flow.schema.json",
+      "session.schema.json",
+      "payload.schema.json",
+      "finding.schema.json",
+      "scan-job.schema.json",
+      "workflow.schema.json",
+      "workflow-run.schema.json",
+      "config.schema.json"
+    ]
+  },
+  "architecture_style": {
+    "pattern": "clean-architecture-with-hexagonal-boundaries",
+    "initial_deployment": "modular-monolith",
+    "scale_out_path": "separate-api-and-worker-processes-behind-stable-ports",
+    "dependency_direction": [
+      "domain has no IO or framework dependencies",
+      "application depends on domain and ports",
+      "feature crates depend on domain and ports",
+      "adapters implement ports and own external IO",
+      "apps are composition roots and wire concrete adapters"
+    ],
+    "rules": [
+      "HTTP handlers do not contain business logic",
+      "Domain types do not depend on Axum, SQLx, Tokio or HTTP clients",
+      "Storage, queue and event implementations are replaceable behind traits",
+      "Cross-crate communication uses typed commands, events and errors",
+      "No global mutable singleton for runtime state"
+    ]
+  },
+  "repository_layout": {
+    "apps": [
+      "api-tester-cli",
+      "api-tester-server",
+      "api-tester-worker"
+    ],
+    "crates": {
+      "domain": "entities, value objects, domain errors and invariants",
+      "application": "use cases, orchestration and job lifecycle",
+      "ports": "repository, queue, proxy, scanner and event traits",
+      "config": "validated config loading and environment overrides",
+      "proxy": "HTTP/HTTPS capture feature",
+      "capture": "bounded ingestion, deduplication and flow buffering",
+      "storage": "SQLite adapter first, PostgreSQL adapter later",
+      "analysis": "tokens, parameters, dependencies and sequencing",
+      "query": "HTTPQL parser and executor",
+      "workflow": "graph model, node registry, execution engine and AI-assisted workflow builder",
+      "scanner": "replay, fuzz scheduler, rate limits and verification",
+      "skills": "built-in security skills and skill registry",
+      "auth": "login flows, token refresh and secret handling",
+      "reporting": "JSON, HTML, SARIF and Mermaid output",
+      "dashboard": "versioned API handlers and static asset serving",
+      "events": "typed in-process events with future external transport",
+      "telemetry": "structured logs, metrics, traces and health state",
+      "test-support": "local mock targets, fixtures and deterministic test helpers"
+    },
+    "top_level_directories": [
+      "apps",
+      "crates",
+      "migrations",
+      "schemas",
+      "tests",
+      "benches",
+      "config",
+      "assets",
+      "infra"
+    ]
+  },
+  "production_requirements": [
+    "Use semantic versioning for binaries, schemas and public APIs",
+    "Expose versioned dashboard endpoints under /api/v1",
+    "Use forward-only database migrations with startup compatibility checks",
+    "Provide health, readiness and liveness endpoints",
+    "Use structured logs with request, session and scan-job correlation IDs",
+    "Provide metrics for throughput, latency, queue depth, errors and resource usage",
+    "Use typed domain errors and avoid panic on user-controlled input",
+    "Redact secrets from logs, reports, crash output and telemetry",
+    "Pin dependencies and run cargo fmt, clippy, test, audit and deny checks in CI",
+    "Produce reproducible release artifacts for Windows MSVC",
+    "Keep configuration external to binaries and support environment overrides",
+    "Define license, update and rollback behavior before commercial release"
+  ],
+  "scalability_strategy": {
+    "stage_1": "Single modular process with Tokio tasks, bounded channels and SQLite",
+    "stage_2": "Separate API/dashboard from scanner worker while keeping the same application ports",
+    "stage_3": "Replace in-process queue with Redis, NATS or another durable broker",
+    "stage_4": "Move production persistence to PostgreSQL and add horizontally scalable workers",
+    "worker_partitioning": [
+      "partition jobs by scan_id and target scope",
+      "enforce per-target budgets centrally",
+      "make scan jobs idempotent and resumable",
+      "persist progress and cancellation state"
+    ],
+    "storage_policy": "SQLite for local single-user mode; PostgreSQL through the same repository ports for commercial multi-user mode"
+  },
+  "workflow_feature": {
+    "purpose": "Post-migration feature to build and run web testing workflows visually or with AI assistance",
+    "requirements": {
+      "logic_builder": "Users create workflows through a visual node-based editor: nodes, edges, start and end markers, conditionals and loops",
+      "ai_builder": "Users describe a workflow in natural language and the system generates a validated workflow graph",
+      "graph_support": "Workflows are directed graphs with explicit node types, edge constraints, input and output schemas",
+      "execution": "Workflows run on the Rust engine with per-node input and output state passing and error propagation",
+      "persistence": "Workflow definitions and run history are versioned and stored in the same storage layer as flows",
+      "extensibility": "New node types register through a static registry without changing the workflow engine"
+    },
+    "evaluation_criteria": [
+      "A workflow with at least 10 nodes and 12 edges is created, saved, reloaded and executed end-to-end",
+      "Cycle detection rejects invalid graphs before execution and reports the offending edges",
+      "Nodes support typed inputs and outputs validated by JSON schema at the graph boundary",
+      "Conditional branches and loops produce deterministic results under a fixed seed",
+      "Per-node timeout, retry and failure handling are configurable and covered by tests",
+      "Natural language prompts produce valid workflow JSON directly or through a bounded repair loop",
+      "AI-generated workflows are validated, versioned and executed exactly like logic-built workflows",
+      "A workflow run can be cancelled, resumed and replayed with identical results",
+      "Workflow-driven requests honor scanner budgets, scope guardrails and rate limits",
+      "The visual editor and the AI builder share the same internal graph contract"
+    ]
+  },
+  "post_migration_roadmap": [
+    {
+      "id": 9,
+      "name": "Workflow builder and engine",
+      "goals": [
+        "Implement the workflow graph model, node registry and execution engine",
+        "Build the visual node editor in the dashboard",
+        "Add AI-assisted workflow generation behind a provider abstraction",
+        "Persist workflow definitions and run history in SQLite"
+      ],
+      "exit_criteria": [
+        "Graph create, read, update, delete, validation, execution and versioning pass integration tests",
+        "AI generation produces schema-valid workflows with bounded repair",
+        "Visual editor and AI builder interoperate on the same graph contract",
+        "All security guardrails apply to workflow-driven requests"
+      ]
+    }
+  ],
+  "runtime_flow": [
+    "Browser or mobile client",
+    "Rust HTTP/HTTPS proxy",
+    "Bounded capture channel",
+    "In-memory buffer and deduplication",
+    "SQLite persistence",
+    "Flow analysis and event bus",
+    "Rust scanner for replay, fuzzing and brute-force testing",
+    "Findings and reports",
+    "Rust dashboard and CLI"
+  ],
+  "phases": [
+    {
+      "id": 0,
+      "name": "Contract and baseline",
+      "goals": [
+        "Freeze current Python behavior as the reference implementation",
+        "Define versioned wire schemas for flows, sessions, findings, payloads and config",
+        "Define UTC timestamps, UUIDs, headers, cookies, body limits and fingerprints"
+      ],
+      "exit_criteria": [
+        "Schemas are versioned and have valid fixtures",
+        "Python tests remain runnable as parity tests",
+        "Rust and Python serialization expectations are documented in source/config"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Rust workspace and domain",
+      "status": "completed",
+      "goals": [
+        "Create the production-oriented Cargo workspace with apps, crates and composition roots",
+        "Create domain, application, ports, config and test-support boundaries",
+        "Port HttpFlow, Session, Payload, Finding and configuration models",
+        "Add serde validation, typed errors and deterministic fingerprint tests",
+        "Enforce dependency direction so domain remains independent of IO frameworks"
+      ],
+      "exit_criteria": [
+        "The workspace layout matches the clean-architecture dependency rules",
+        "Domain and application crates compile without infrastructure adapters",
+        "cargo test --workspace passes",
+        "cargo fmt --check passes",
+        "cargo clippy --workspace -- -D warnings passes"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Storage, buffer and events",
+      "status": "completed",
+      "goals": [
+        "Implement SQLite repositories behind the Phase 1 port traits",
+        "Implement bounded tokio channels, a dashboard ring buffer and a dedicated persistence writer",
+        "Implement deduplication, broadcast events and typed error propagation",
+        "Avoid global mutable state and unbounded task creation",
+        "Add forward-only migrations and versioned schema checks at startup"
+      ],
+      "exit_criteria": [
+        "Storage persistence",
+        "Flows saved through FlowRepository survive a full process restart and are returned identically",
+        "SessionRepository round-trips sessions including end_time and flow_count across restarts",
+        "Repository operations are atomic: a failed write leaves no partial row and returns a typed PortError",
+        "Concurrent writers to SQLite never deadlock and produce consistent snapshots under a single-writer worker",
+        "Large flow bodies (up to the configured cap) persist without truncation and restore byte-for-byte",
+        "Buffer and backpressure",
+        "A bounded channel rejects or blocks producers when full instead of growing memory without limit",
+        "Backpressure is observable: when the persistence writer is slow, buffer occupancy stays bounded and no data is silently lost",
+        "Overflow behavior is explicit and configurable (drop-oldest, block, or fail-fast) and covered by tests",
+        "The dashboard ring buffer returns a consistent snapshot while producers keep pushing concurrently",
+        "Buffer does not allocate unboundedly when producers outpace consumers for a sustained period",
+        "Deduplication",
+        "Duplicate flows with an identical fingerprint are dropped and counted, and the metric is exposed",
+        "Fingerprint collisions with different request bodies are avoided in the tested dataset",
+        "Dedup state can be reset without corrupting already-persisted flows",
+        "Events",
+        "Broadcast events reach all subscribers and a slow subscriber never blocks producers",
+        "Events are typed, ordered per topic, and include correlation and session identifiers",
+        "Event publishing failures are isolated so one handler failure does not break the pipeline",
+        "Migrations and compatibility",
+        "Migrations are forward-only and startup fails fast with a clear message on schema mismatch",
+        "Existing databases migrate from the current baseline to the latest schema without data loss",
+        "Schema includes future-proof tables for workflow graph nodes and edges so Phase 9 requires no destructive change",
+        "Concurrency and hygiene",
+        "No global mutable singleton is used for runtime state",
+        "Task creation is bounded; no unbounded spawn per incoming flow",
+        "cargo test --workspace passes with storage and event integration tests",
+        "cargo fmt --check passes",
+        "cargo clippy --workspace --all-targets -- -D warnings passes",
+        "Performance",
+        "A benchmark shows sustained flow ingest at the target request rate with bounded memory",
+        "Persist latency for a single flow stays within a documented budget at the target concurrency",
+        "Memory usage remains flat under sustained ingest and drain cycles"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Rust proxy",
+      "goals": [
+        "Implement HTTP forwarding and flow capture",
+        "Port scope filtering, match/replace and session tracking",
+        "Implement CONNECT tunneling and HTTPS MITM",
+        "Preserve ports 127.0.0.1:8080 and certificate profile behavior"
+      ],
+      "exit_criteria": [
+        "HTTP integration tests match Python behavior",
+        "HTTPS MITM works with a local test certificate and mock server",
+        "Out-of-scope traffic is forwarded but not captured",
+        "Proxy handles bounded body sizes and connection shutdown correctly"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Analysis and query",
+      "goals": [
+        "Port token extraction and parameter classification",
+        "Build dependency graphs and flow sequencing",
+        "Implement HTTPQL parser and executor",
+        "Port Mermaid and replay-code generation",
+        "Port login flow and token refresh behavior"
+      ],
+      "exit_criteria": [
+        "Analysis parity tests pass against Python fixtures",
+        "Parser property tests cover invalid and nested expressions",
+        "Dependency and sequencing results are deterministic"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Scanner engine",
+      "goals": [
+        "Implement ScanJob, ScopeGuard, MutationEngine and PayloadSource",
+        "Implement async scheduler, request executor and response verifier",
+        "Add per-host concurrency, rate limits, retries, cancellation and budgets",
+        "Support deterministic seeds and request/payload deduplication"
+      ],
+      "exit_criteria": [
+        "Local mock targets demonstrate replay and mutation correctness",
+        "Concurrency and rate-limit tests pass",
+        "Scanner stops on cancellation, budget exhaustion and scope violations",
+        "Benchmark results are recorded for throughput, latency and memory"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Skills and reporting",
+      "goals": [
+        "Define a Rust skill trait and static registry",
+        "Port payload dictionaries and implement skills incrementally",
+        "Implement JSON, HTML, SARIF and Mermaid outputs",
+        "Correlate findings and normalize severity"
+      ],
+      "exit_criteria": [
+        "Each enabled skill has unit tests and safe local fixtures",
+        "Reports contain reproducible request, payload and response metadata",
+        "Secrets are redacted by default"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Dashboard and CLI",
+      "goals": [
+        "Implement the Rust CLI with proxy, capture, analyze, scan, report, session and config commands",
+        "Implement Axum dashboard API on port 2712",
+        "Preserve flow list, detail and repeater functionality",
+        "Replace quick_capture.py and quick.bat runtime behavior",
+        "Expose workflow graph CRUD, validation and run endpoints under /api/v1 as a stable contract"
+      ],
+      "exit_criteria": [
+        "Dashboard health, flow list, flow detail and repeater smoke tests pass",
+        "CLI can start and stop proxy without Python",
+        "Dashboard reads from the same domain and storage contracts as the scanner",
+        "Workflow graph API smoke tests pass for create, validate, list and run"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Parity, benchmark and cutover",
+      "goals": [
+        "Run Python-versus-Rust parity tests",
+        "Run local load and scanner benchmarks",
+        "Build optimized MSVC release binaries",
+        "Remove Python implementation only after acceptance criteria pass"
+      ],
+      "exit_criteria": [
+        "cargo test --workspace passes",
+        "cargo clippy --workspace -- -D warnings passes",
+        "cargo build --release passes",
+        "HTTP and HTTPS capture parity is accepted",
+        "Scanner throughput and resource limits are accepted",
+        "Rust CLI and dashboard operate without Python"
+      ]
+    }
+  ],
+  "performance_rules": [
+    "Use Tokio for async scheduling",
+    "Use connection pooling and keep-alive",
+    "Use bounded queues and explicit backpressure",
+    "Use semaphore-based concurrency limits",
+    "Apply per-host rate limits",
+    "Stream or cap large response bodies",
+    "Avoid unnecessary request and response copies",
+    "Support cancellation and deterministic seeds",
+    "Benchmark against local mock targets only"
+  ],
+  "security_guardrails": [
+    "Require an explicit target allowlist",
+    "Enforce scope include and exclude rules before sending mutations",
+    "Enforce request, concurrency, duration and payload budgets",
+    "Provide dry-run mode",
+    "Provide an immediate stop mechanism",
+    "Redact credentials and tokens in logs and reports",
+    "Do not test targets outside authorized scope"
+  ],
+  "initial_dependencies_to_evaluate": [
+    "tokio",
+    "hyper",
+    "reqwest",
+    "rustls",
+    "rcgen",
+    "axum",
+    "clap",
+    "serde",
+    "sqlx",
+    "petgraph",
+    "tower",
+    "tracing",
+    "criterion",
+    "proptest"
+  ],
+  "known_risks": [
+    "HTTPS MITM certificate generation and TLS interception",
+    "Header and cookie fidelity during proxy forwarding",
+    "Large body memory usage",
+    "Parity differences between Pydantic and serde validation",
+    "Plugin ABI stability",
+    "Workflow graph complexity grows with node types, branching and AI generation quality",
+    "MSVC build environment availability on clean machines",
+    "The existing pyproject.toml references a deleted README.md and is legacy during migration"
+  ]
+}

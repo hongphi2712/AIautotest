@@ -1,0 +1,50 @@
+[workspace]
+members = [
+    "apps/api-tester-cli",
+    "apps/api-tester-server",
+    "crates/application",
+    "crates/capture",
+    "crates/config",
+    "crates/domain",
+    "crates/events",
+    "crates/ports",
+    "crates/storage",
+    "crates/test-support",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["API-AutoTester Team"]
+
+[workspace.dependencies]
+api-tester-application = { path = "crates/application" }
+api-tester-capture = { path = "crates/capture" }
+api-tester-config = { path = "crates/config" }
+api-tester-domain = { path = "crates/domain" }
+api-tester-events = { path = "crates/events" }
+api-tester-ports = { path = "crates/ports" }
+api-tester-storage = { path = "crates/storage" }
+api-tester-test-support = { path = "crates/test-support" }
+
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+clap = { version = "4.5", features = ["derive"] }
+criterion = "0.5"
+md5 = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

@@ -1,0 +1,20 @@
+title = "API-AutoTester gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional test fixtures, generated files and build artifacts"
+paths = [
+    '''.*target/.*''',
+    '''.*node_modules/.*''',
+    '''.*\.git/.*''',
+    '''.*\.pytest_cache/.*''',
+    '''.*__pycache__/.*''',
+    '''.*\.pyc$''',
+    '''Cargo\.lock$''',
+]
+regexes = [
+    # Sample JWT used as a deterministic test fixture in tests/conftest.py.
+    '''eyJhbGciOiJIUzI1NiJ9\.eyJ1c2VyX2lkIjoxMjN9\.abc''',
+]
