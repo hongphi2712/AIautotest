@@ -7,6 +7,8 @@ use crate::DomainError;
 pub const DEFAULT_PROXY_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PROXY_PORT: u16 = 8080;
 pub const DEFAULT_BUFFER_SIZE: usize = 100_000;
+pub const DEFAULT_BUFFER_MAX_BYTES: usize = 0;
+pub const DEFAULT_BUFFER_DEDUP_LIMIT: usize = 100_000;
 pub const DEFAULT_SCANNER_CONCURRENCY: usize = 50;
 pub const DEFAULT_REQUEST_TIMEOUT_SECONDS: f64 = 30.0;
 
@@ -92,10 +94,24 @@ pub struct BufferConfig {
     pub max_size: usize,
     #[serde(default = "default_true")]
     pub dedup_enabled: bool,
+    /// Approximate byte cap for the in-memory buffer; zero disables the cap.
+    #[serde(default = "default_buffer_max_bytes")]
+    pub max_bytes: usize,
+    /// Upper bound for the deduplication fingerprint set before it is reset.
+    #[serde(default = "default_buffer_dedup_limit")]
+    pub dedup_limit: usize,
 }
 
 const fn default_buffer_size() -> usize {
     DEFAULT_BUFFER_SIZE
+}
+
+const fn default_buffer_max_bytes() -> usize {
+    DEFAULT_BUFFER_MAX_BYTES
+}
+
+const fn default_buffer_dedup_limit() -> usize {
+    DEFAULT_BUFFER_DEDUP_LIMIT
 }
 
 const fn default_true() -> bool {
@@ -107,6 +123,8 @@ impl Default for BufferConfig {
         Self {
             max_size: default_buffer_size(),
             dedup_enabled: true,
+            max_bytes: default_buffer_max_bytes(),
+            dedup_limit: default_buffer_dedup_limit(),
         }
     }
 }

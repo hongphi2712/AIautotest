@@ -82,6 +82,14 @@ impl FlowBuffer {
         self
     }
 
+    /// Builds a capture buffer from validated configuration. Uses `Block`
+    /// overflow so producers experience backpressure instead of silent loss.
+    pub fn from_config(config: &api_tester_domain::BufferConfig) -> Self {
+        Self::new(config.max_size, config.dedup_enabled, OverflowPolicy::Block)
+            .with_max_bytes(config.max_bytes)
+            .with_dedup_limit(config.dedup_limit)
+    }
+
     pub fn reset_dedup(&self) {
         if self.dedup_enabled {
             self.dedup
@@ -339,13 +347,27 @@ mod tests {
         assert_eq!(stats.dropped, 1);
         assert!(stats.queued_bytes <= 1_200);
     }
-
     #[tokio::test]
     async fn oversized_single_flow_is_still_accepted_when_empty() {
         let buffer = FlowBuffer::new(16, false, OverflowPolicy::DropOldest).with_max_bytes(100);
 
         assert_eq!(buffer.push(big_flow(1, 2_000)).await, PushOutcome::Accepted);
         assert_eq!(buffer.stats().len, 1);
+    }
+
+    #[test]
+    fn from_config_wires_limits() {
+        let config = api_tester_domain::BufferConfig {
+            max_size: 64,
+            dedup_enabled: true,
+            max_bytes: 4_096,
+            dedup_limit: 32,
+        };
+        let buffer = FlowBuffer::from_config(&config);
+        let stats = buffer.stats();
+        assert_eq!(stats.capacity, 64);
+        assert_eq!(stats.max_bytes, 4_096);
+        assert_eq!(buffer.dedup_len(), 0);
     }
 
     #[tokio::test]

@@ -144,6 +144,17 @@
     ],
     "storage_policy": "SQLite for local single-user mode; PostgreSQL through the same repository ports for commercial multi-user mode"
   },
+  "event_transport_contract": {
+    "current": "In-process broadcast EventBus; best-effort delivery, lagging receivers drop events without blocking producers",
+    "ordering": "Events are ordered per topic within a single process",
+    "durability_rule": "Flows are persisted by the writer BEFORE the capture event is published; consumers must never treat events as durable storage",
+    "scale_out": {
+      "trigger": "When worker processes are split (scale-out stages 2/3), replace the in-process bus with a durable broker behind the existing EventPublisher port",
+      "guarantees": "At-least-once delivery with consumer groups and explicit acknowledgement",
+      "wire_format": "Reuse the serialized DomainEvent as the wire contract; add a schema version field before any external transport lands",
+      "idempotency": "Consumers must tolerate duplicate events, so handler side-effects must be idempotent"
+    }
+  },
   "workflow_feature": {
     "purpose": "Post-migration feature to build and run web testing workflows visually or with AI assistance",
     "requirements": {

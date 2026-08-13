@@ -78,7 +78,9 @@ impl ConfigLoader {
 
 #[cfg(test)]
 mod tests {
-    use api_tester_domain::{AppConfig, DEFAULT_BUFFER_SIZE};
+    use api_tester_domain::{
+        AppConfig, DEFAULT_BUFFER_DEDUP_LIMIT, DEFAULT_BUFFER_MAX_BYTES, DEFAULT_BUFFER_SIZE,
+    };
 
     use super::ConfigLoader;
 
@@ -89,6 +91,8 @@ mod tests {
         assert_eq!(config.proxy.host, "127.0.0.1");
         assert_eq!(config.proxy.port, 8080);
         assert_eq!(config.buffer.max_size, DEFAULT_BUFFER_SIZE);
+        assert_eq!(config.buffer.max_bytes, DEFAULT_BUFFER_MAX_BYTES);
+        assert_eq!(config.buffer.dedup_limit, DEFAULT_BUFFER_DEDUP_LIMIT);
         assert_eq!(config.scanner.max_concurrent_requests, 50);
     }
 
