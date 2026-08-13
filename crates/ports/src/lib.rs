@@ -38,6 +38,13 @@ pub trait EventPublisher: Send + Sync {
     async fn publish(&self, event: DomainEvent) -> Result<(), PortError>;
 }
 
+/// Boundary between the proxy and the capture pipeline. Implemented by
+/// adapters that push flows into the bounded buffer and event bus.
+#[async_trait]
+pub trait CaptureSink: Send + Sync {
+    async fn push(&self, flow: HttpFlow) -> Result<(), PortError>;
+}
+
 #[async_trait]
 pub trait ScanExecutor: Send + Sync {
     async fn submit(&self, job: ScanJob) -> Result<String, PortError>;

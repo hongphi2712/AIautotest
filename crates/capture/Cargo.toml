@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 api-tester-domain.workspace = true
 api-tester-ports.workspace = true
+async-trait.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 

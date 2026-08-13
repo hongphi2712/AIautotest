@@ -8,6 +8,7 @@ members = [
     "crates/domain",
     "crates/events",
     "crates/ports",
+    "crates/proxy",
     "crates/storage",
     "crates/test-support",
 ]
@@ -27,6 +28,7 @@ api-tester-config = { path = "crates/config" }
 api-tester-domain = { path = "crates/domain" }
 api-tester-events = { path = "crates/events" }
 api-tester-ports = { path = "crates/ports" }
+api-tester-proxy = { path = "crates/proxy" }
 api-tester-storage = { path = "crates/storage" }
 api-tester-test-support = { path = "crates/test-support" }
 
@@ -34,7 +36,9 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 criterion = "0.5"
+flate2 = "1"
 md5 = "0.7"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
