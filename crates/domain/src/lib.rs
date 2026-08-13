@@ -7,9 +7,11 @@ mod scan;
 
 pub use config::{
     AppConfig, BrowserConfig, BufferConfig, DEFAULT_BUFFER_DEDUP_LIMIT, DEFAULT_BUFFER_MAX_BYTES,
-    DEFAULT_BUFFER_SIZE, DEFAULT_PROXY_HOST, DEFAULT_PROXY_PORT, DEFAULT_REQUEST_TIMEOUT_SECONDS,
-    DEFAULT_SCANNER_CONCURRENCY, MatchCondition, MatchConditionType, MatchRule, OastConfig,
-    ProxyConfig, ReplaceAction, ReplaceActionType, RuleDirection, ScannerConfig, ScopeConfig,
+    DEFAULT_BUFFER_SIZE, DEFAULT_IDLE_TIMEOUT_SECS, DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_CONNECTIONS, DEFAULT_PROXY_HOST, DEFAULT_PROXY_PORT,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS, DEFAULT_SCANNER_CONCURRENCY, DEFAULT_UPSTREAM_VERIFY_TLS,
+    MatchCondition, MatchConditionType, MatchRule, OastConfig, ProxyConfig, ReplaceAction,
+    ReplaceActionType, RuleDirection, ScannerConfig, ScopeConfig,
 };
 pub use error::DomainError;
 pub use event::DomainEvent;

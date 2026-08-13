@@ -80,6 +80,8 @@ impl ConfigLoader {
 mod tests {
     use api_tester_domain::{
         AppConfig, DEFAULT_BUFFER_DEDUP_LIMIT, DEFAULT_BUFFER_MAX_BYTES, DEFAULT_BUFFER_SIZE,
+        DEFAULT_IDLE_TIMEOUT_SECS, DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_CONNECTIONS,
+        DEFAULT_UPSTREAM_VERIFY_TLS,
     };
 
     use super::ConfigLoader;
@@ -94,6 +96,13 @@ mod tests {
         assert_eq!(config.buffer.max_bytes, DEFAULT_BUFFER_MAX_BYTES);
         assert_eq!(config.buffer.dedup_limit, DEFAULT_BUFFER_DEDUP_LIMIT);
         assert_eq!(config.scanner.max_concurrent_requests, 50);
+        assert_eq!(config.proxy.max_body_bytes, DEFAULT_MAX_BODY_BYTES);
+        assert_eq!(
+            config.proxy.upstream_verify_tls,
+            DEFAULT_UPSTREAM_VERIFY_TLS
+        );
+        assert_eq!(config.proxy.max_connections, DEFAULT_MAX_CONNECTIONS);
+        assert_eq!(config.proxy.idle_timeout_secs, DEFAULT_IDLE_TIMEOUT_SECS);
     }
 
     #[test]

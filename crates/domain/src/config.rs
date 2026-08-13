@@ -57,7 +57,25 @@ pub struct ProxyConfig {
     pub port: u16,
     #[serde(default)]
     pub ssl_cert_dir: Option<PathBuf>,
+    /// Maximum captured body size in bytes; larger bodies are truncated.
+    #[serde(default = "default_max_body_bytes")]
+    pub max_body_bytes: usize,
+    /// When false (default) upstream TLS certificates are not verified, which
+    /// is required for HTTPS interception. Keep off for MITM capture.
+    #[serde(default = "default_upstream_verify_tls")]
+    pub upstream_verify_tls: bool,
+    /// Upper bound on concurrent client connections handled by the proxy.
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+    /// Idle keep-alive timeout in seconds for client connections.
+    #[serde(default = "default_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
 }
+
+pub const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+pub const DEFAULT_UPSTREAM_VERIFY_TLS: bool = false;
+pub const DEFAULT_MAX_CONNECTIONS: usize = 256;
+pub const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 60;
 
 fn default_proxy_host() -> String {
     DEFAULT_PROXY_HOST.to_owned()
@@ -67,12 +85,32 @@ const fn default_proxy_port() -> u16 {
     DEFAULT_PROXY_PORT
 }
 
+const fn default_max_body_bytes() -> usize {
+    DEFAULT_MAX_BODY_BYTES
+}
+
+const fn default_upstream_verify_tls() -> bool {
+    DEFAULT_UPSTREAM_VERIFY_TLS
+}
+
+const fn default_max_connections() -> usize {
+    DEFAULT_MAX_CONNECTIONS
+}
+
+const fn default_idle_timeout_secs() -> u64 {
+    DEFAULT_IDLE_TIMEOUT_SECS
+}
+
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             host: default_proxy_host(),
             port: default_proxy_port(),
             ssl_cert_dir: None,
+            max_body_bytes: default_max_body_bytes(),
+            upstream_verify_tls: default_upstream_verify_tls(),
+            max_connections: default_max_connections(),
+            idle_timeout_secs: default_idle_timeout_secs(),
         }
     }
 }

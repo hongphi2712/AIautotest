@@ -10,9 +10,29 @@ authors.workspace = true
 api-tester-domain.workspace = true
 api-tester-ports.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
+chrono.workspace = true
 flate2.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-util.workspace = true
+rcgen.workspace = true
 regex.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+api-tester-test-support.workspace = true
+async-trait.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true

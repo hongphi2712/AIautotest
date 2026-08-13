@@ -1,8 +1,21 @@
+pub mod cert;
+pub mod connect;
 pub mod error;
+pub mod flow;
 pub mod http;
 pub mod match_replace;
 pub mod scope;
+pub mod server;
+pub mod session;
+pub mod transport;
+pub mod upstream;
 
+pub use cert::{CertProvider, HostCert, RcgenCertProvider};
 pub use error::ProxyError;
+pub use flow::{FlowBuilder, FlowParts};
 pub use match_replace::MatchReplaceEngine;
 pub use scope::ScopeFilter;
+pub use server::ProxyServer;
+pub use session::ActiveSession;
+pub use transport::PrefixIo;
+pub use upstream::UpstreamClient;
