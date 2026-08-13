@@ -22,6 +22,14 @@ impl MatchReplaceEngine {
         &self.rules
     }
 
+    pub fn add_rule(&mut self, rule: MatchRule) {
+        self.rules.push(rule);
+    }
+
+    pub fn remove_rule(&mut self, name: &str) {
+        self.rules.retain(|rule| rule.name != name);
+    }
+
     pub fn apply_to_request_headers(
         &self,
         headers: &HeaderMap,
@@ -210,5 +218,128 @@ mod tests {
         let out = engine.apply_to_body("token=secret-42", RuleDirection::Request, &BTreeMap::new());
 
         assert_eq!(out, "token=REDACTED");
+    }
+
+    #[test]
+    fn header_condition_matches() {
+        let rule = MatchRule {
+            name: "modify_json".to_owned(),
+            direction: RuleDirection::Response,
+            r#match: MatchCondition {
+                kind: MatchConditionType::Header,
+                header: Some("Content-Type".to_owned()),
+                pattern: Some(r"application/json".to_owned()),
+            },
+            action: ReplaceAction {
+                kind: ReplaceActionType::SetHeader,
+                header: Some("X-JSON".to_owned()),
+                value: Some("true".to_owned()),
+                pattern: None,
+                replacement: None,
+            },
+        };
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let matched = engine.apply_to_response_headers(
+            &BTreeMap::from([("Content-Type".to_owned(), "application/json".to_owned())]),
+            "/",
+        );
+        assert_eq!(matched.get("X-JSON").map(String::as_str), Some("true"));
+
+        let unmatched = engine.apply_to_response_headers(
+            &BTreeMap::from([("Content-Type".to_owned(), "text/html".to_owned())]),
+            "/",
+        );
+        assert!(!unmatched.contains_key("X-JSON"));
+    }
+
+    #[test]
+    fn path_pattern_condition_matches() {
+        let rule = MatchRule {
+            name: "flag_admin".to_owned(),
+            direction: RuleDirection::Request,
+            r#match: MatchCondition {
+                kind: MatchConditionType::PathPattern,
+                header: None,
+                pattern: Some(r"/admin/.*".to_owned()),
+            },
+            action: ReplaceAction {
+                kind: ReplaceActionType::SetHeader,
+                header: Some("X-Admin".to_owned()),
+                value: Some("true".to_owned()),
+                pattern: None,
+                replacement: None,
+            },
+        };
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let admin = engine.apply_to_request_headers(&BTreeMap::new(), "/admin/users", None);
+        assert_eq!(admin.get("X-Admin").map(String::as_str), Some("true"));
+
+        let public = engine.apply_to_request_headers(&BTreeMap::new(), "/public", None);
+        assert!(!public.contains_key("X-Admin"));
+    }
+
+    #[test]
+    fn password_body_is_masked() {
+        let rule = MatchRule {
+            name: "mask_sensitive".to_owned(),
+            direction: RuleDirection::Response,
+            r#match: MatchCondition {
+                kind: MatchConditionType::BodyRegex,
+                header: None,
+                pattern: Some(r#""password"\s*:\s*"[^"]*""#.to_owned()),
+            },
+            action: ReplaceAction {
+                kind: ReplaceActionType::ReplaceBody,
+                header: None,
+                value: None,
+                pattern: Some(r#""password"\s*:\s*"[^"]*""#.to_owned()),
+                replacement: Some(r#""password":"***""#.to_owned()),
+            },
+        };
+        let engine = MatchReplaceEngine::new(vec![rule]);
+        let body = r#"{"user":"admin","password":"secret123","role":"admin"}"#;
+
+        let out = engine.apply_to_body(body, RuleDirection::Response, &BTreeMap::new());
+
+        assert!(out.contains(r#""password":"***""#));
+        assert!(!out.contains("secret123"));
+    }
+
+    #[test]
+    fn remove_rule_removes_by_name() {
+        let action = ReplaceAction {
+            kind: ReplaceActionType::SetHeader,
+            header: Some("X-Test".to_owned()),
+            value: Some("1".to_owned()),
+            pattern: None,
+            replacement: None,
+        };
+        let mut engine = MatchReplaceEngine::new(vec![always_rule(action)]);
+        engine.remove_rule("test");
+
+        let out = engine.apply_to_request_headers(&BTreeMap::new(), "/", None);
+        assert!(!out.contains_key("X-Test"));
+    }
+
+    #[test]
+    fn wrong_direction_skipped() {
+        let rule = MatchRule {
+            name: "response_only".to_owned(),
+            direction: RuleDirection::Response,
+            r#match: MatchCondition::default(),
+            action: ReplaceAction {
+                kind: ReplaceActionType::SetHeader,
+                header: Some("X-Resp".to_owned()),
+                value: Some("1".to_owned()),
+                pattern: None,
+                replacement: None,
+            },
+        };
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let out = engine.apply_to_request_headers(&BTreeMap::new(), "/", None);
+        assert!(!out.contains_key("X-Resp"));
     }
 }

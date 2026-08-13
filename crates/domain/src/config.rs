@@ -22,17 +22,31 @@ const DEFAULT_NOISE_HOSTS: &[&str] = &[
     r"googletagmanager\.com",
     r"google-analytics\.com",
     r"googleusercontent\.com",
+    r"gvt1\.com",
+    r"gvt2\.com",
     r"youtube\.com",
+    r"ytimg\.com",
     r"doubleclick\.net",
     r"facebook\.com",
     r"fbcdn\.net",
     r"cloudflareinsights\.com",
+    r"tynt\.com",
+    r"scorecardresearch\.com",
+    r"quantserve\.com",
+    r"outbrain\.com",
+    r"taboola\.com",
+    r"criteo\.com",
+    r"adnxs\.com",
+    r"pubmatic\.com",
+    r"rubiconproject\.com",
 ];
 const DEFAULT_NOISE_PATHS: &[&str] = &[
     r".*\.(png|jpg|jpeg|gif|webp|svg|ico|jfif|css|js|woff2?|ttf|eot|map)$",
     r"/_next/static/",
     r"/cdn-cgi/",
     r"favicon",
+    r"beacon\.min\.js",
+    r"/assets/generated/",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

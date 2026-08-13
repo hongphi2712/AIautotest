@@ -113,4 +113,78 @@ mod tests {
         assert!(!filter.should_capture("example.com", "/img/logo.png"));
         assert!(filter.should_capture("example.com", "/api/login"));
     }
+
+    #[test]
+    fn default_allows_normal_traffic() {
+        let filter = ScopeFilter::new(ScopeConfig::default()).unwrap();
+        assert!(filter.should_capture("example.com", "/api/test"));
+    }
+
+    #[test]
+    fn default_excludes_noise_hosts() {
+        let filter = ScopeFilter::new(ScopeConfig::default()).unwrap();
+        assert!(!filter.should_capture("google.com", "/"));
+        assert!(!filter.should_capture("www.google-analytics.com", "/collect"));
+    }
+
+    #[test]
+    fn excludes_static_with_query_string() {
+        let filter = ScopeFilter::new(ScopeConfig::default()).unwrap();
+        assert!(!filter.should_capture("example.com", "/app.js?v=123"));
+        assert!(!filter.should_capture("example.com", "/style.css?ver=1.0"));
+        assert!(!filter.should_capture("example.com", "/img/logo.png?size=100"));
+        assert!(filter.should_capture("example.com", "/api/data?v=1"));
+    }
+
+    #[test]
+    fn custom_exclude_path_pattern() {
+        let filter = ScopeFilter::new(ScopeConfig {
+            exclude_paths: vec![r".*\.(png|jpg|css)$".to_owned()],
+            ..ScopeConfig::default()
+        })
+        .unwrap();
+        assert!(filter.should_capture("example.com", "/api/data"));
+        assert!(!filter.should_capture("example.com", "/style.css"));
+        assert!(!filter.should_capture("example.com", "/img/logo.png"));
+    }
+
+    #[test]
+    fn include_and_exclude_hosts() {
+        let include = ScopeFilter::new(ScopeConfig {
+            include_hosts: vec![r".*\.example\.com$".to_owned()],
+            ..ScopeConfig::default()
+        })
+        .unwrap();
+        assert!(include.should_capture("api.example.com", "/test"));
+        assert!(!include.should_capture("google.com", "/test"));
+
+        let exclude = ScopeFilter::new(ScopeConfig {
+            exclude_hosts: vec![r".*\.google\.com$".to_owned()],
+            ..ScopeConfig::default()
+        })
+        .unwrap();
+        assert!(exclude.should_capture("example.com", "/test"));
+        assert!(!exclude.should_capture("www.google.com", "/test"));
+    }
+
+    #[test]
+    fn include_paths_and_combined_rules() {
+        let filter = ScopeFilter::new(ScopeConfig {
+            include_paths: vec![r"/api/.*".to_owned()],
+            ..ScopeConfig::default()
+        })
+        .unwrap();
+        assert!(filter.should_capture("example.com", "/api/users"));
+        assert!(!filter.should_capture("example.com", "/static/page"));
+
+        let combined = ScopeFilter::new(ScopeConfig {
+            include_hosts: vec![r".*\.target\.com$".to_owned()],
+            exclude_paths: vec![r".*\.js$".to_owned()],
+            ..ScopeConfig::default()
+        })
+        .unwrap();
+        assert!(combined.should_capture("api.target.com", "/data"));
+        assert!(!combined.should_capture("api.target.com", "/bundle.js"));
+        assert!(!combined.should_capture("other.com", "/data"));
+    }
 }
