@@ -129,10 +129,13 @@ export class InterceptView extends HTMLElement {
     if (!entry) return;
     try {
       await invoke('intercept_forward', { id: entry.id, edit: null });
-      this.selectedInterceptId = null;
     } catch (error) {
       showError('Forward: ' + error);
+      return;
     }
+    this.interceptEntries = this.interceptEntries.filter((e) => e.id !== entry.id);
+    if (this.selectedInterceptId === entry.id) this.selectedInterceptId = null;
+    this.renderIntercepted();
   }
 
   async dropRequest() {
@@ -140,10 +143,13 @@ export class InterceptView extends HTMLElement {
     if (!entry) return;
     try {
       await invoke('intercept_drop', { id: entry.id });
-      this.selectedInterceptId = null;
     } catch (error) {
       showError('Drop: ' + error);
+      return;
     }
+    this.interceptEntries = this.interceptEntries.filter((e) => e.id !== entry.id);
+    if (this.selectedInterceptId === entry.id) this.selectedInterceptId = null;
+    this.renderIntercepted();
   }
 
   async applyInterceptEdit() {
@@ -177,14 +183,22 @@ export class InterceptView extends HTMLElement {
     };
     try {
       await invoke('intercept_forward', { id: entry.id, edit });
-      this.selectedInterceptId = null;
     } catch (error) {
       showError('Apply edits: ' + error);
+      return;
     }
+    this.interceptEntries = this.interceptEntries.filter((e) => e.id !== entry.id);
+    if (this.selectedInterceptId === entry.id) this.selectedInterceptId = null;
+    this.renderIntercepted();
   }
 
   renderIntercepted() {
     const info = this.querySelector('#intercept-request-info');
+    const first = this.interceptEntries[0];
+    const last = this.interceptEntries[this.interceptEntries.length - 1];
+    const fingerprint = this.interceptEntries.length + ':' + (first ? first.id : '') + ':' + (last ? last.id : '');
+    if (fingerprint === this._interceptFp) return;
+    this._interceptFp = fingerprint;
     this.tbody.innerHTML = '';
     if (!this.interceptEntries.length) {
       info.textContent = 'No intercepted request';
@@ -196,14 +210,26 @@ export class InterceptView extends HTMLElement {
       const type = 'HTTP';
       const direction = f.kind === 'response' ? '&rarr; Response' : '&rarr; Request';
       const status = f.kind === 'response' ? (f.status || '-') : '-';
-      tr.innerHTML = `<td class="col-num">${i + 1}</td><td class="col-time">${formatTime(f.timestamp)}</td><td class="col-type">${type}</td><td class="col-direction">${direction}</td><td class="col-method method ${f.method}">${f.method}</td><td class="col-url" title="${f.url}">${f.url}</td><td class="col-status ${colorStatus(f.status || 0)}">${status}</td><td class="col-length">${f.body ? f.body.length : 0}</td>`;
-      tr.onclick = () => this.showInterceptDetail(f);
+      tr.innerHTML = `<td class="col-num">${i + 1}</td><td class="col-time">${formatTime(f.timestamp)}</td><td class="col-type">${type}</td><td class="col-direction">${direction}</td><td class="col-method method ${f.method}">${f.method}</td><td class="col-url" title="${f.url}">${f.url}</td><td class="col-status ${colorStatus(f.status || 0)}">${status}</td><td class="col-length">${f.body_len || 0}</td>`;
+      tr.onclick = () => this.showInterceptDetail(f.id);
       this.tbody.appendChild(tr);
     });
   }
 
-  showInterceptDetail(f) {
-    this.selectedInterceptId = f.id;
+  async showInterceptDetail(id) {
+    this.selectedInterceptId = id;
+    let f;
+    try {
+      f = await invoke('intercept_detail', { id });
+    } catch (error) {
+      showError('Intercept detail: ' + error);
+      return;
+    }
+    if (!f) {
+      // Entry already forwarded/dropped since the last poll.
+      this.selectedInterceptId = null;
+      return;
+    }
     const requestInfo = this.querySelector('#intercept-request-info');
     let host = '';
     try { host = new URL(f.url).host; } catch (error) {}
@@ -241,7 +267,7 @@ export class InterceptView extends HTMLElement {
       requestHex: toHex(f.body || ''),
       responseHex: f.kind === 'response' ? toHex(f.body || '') : '',
       responseRender: f.kind === 'response' ? (f.body || '<p>(empty response)</p>') : '<p>(response not held)</p>',
-      attributes: f.method + ' ' + f.url + '\nStatus: ' + (f.status || '-') + '\nLength: ' + (f.body ? f.body.length : 0),
+      attributes: f.method + ' ' + f.url + '\nStatus: ' + (f.status || '-') + '\nLength: ' + (f.body_len || f.body.length || 0),
       params: '-',
       cookies: '-',
       reqHeadersText: headers,

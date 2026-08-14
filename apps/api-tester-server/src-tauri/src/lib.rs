@@ -41,6 +41,7 @@ pub fn run() {
             commands::intercept_set_scopes,
             commands::intercept_status,
             commands::intercept_list,
+            commands::intercept_detail,
             commands::intercept_forward,
             commands::intercept_drop,
             commands::intercept_clear,

@@ -200,7 +200,8 @@ async fn response_intercept_forward_with_edits() {
     let entry = poll_entry(&intercept, "response").await;
     assert_eq!(entry.kind, "response");
     assert_eq!(entry.status, Some(200));
-    assert!(entry.body.contains("received"));
+    let full = intercept.get(&entry.id).expect("detail fetch");
+    assert!(full.body.contains("received"));
 
     let edit = InterceptEdit {
         method: entry.method.clone(),
@@ -348,7 +349,8 @@ async fn request_intercept_forward_with_post_body_edits() {
         .await
     });
     let entry = poll_entry(&intercept, "request").await;
-    assert!(entry.body.contains("admin"));
+    let full = intercept.get(&entry.id).expect("detail fetch");
+    assert!(full.body.contains("admin"));
 
     let edit = InterceptEdit {
         method: "POST".into(),

@@ -26,6 +26,10 @@ pub struct InterceptEntry {
     pub reason: Option<String>,
     pub headers: Vec<InterceptHeader>,
     pub body: String,
+    /// Length of the full held body. `intercept_list` ships entries with the
+    /// body blanked (polled every second); the full entry is fetched on demand
+    /// via `intercept_detail` so large bodies do not jank the UI.
+    pub body_len: usize,
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
@@ -135,12 +139,30 @@ impl InterceptController {
         rx.await.unwrap_or(InterceptDecision::Forward(None))
     }
 
-    /// Items currently held, in arrival order.
+    /// Items currently held, in arrival order. Bodies are blanked so the
+    /// UI's 1s polling stays cheap; use [`InterceptController::get`] for the
+    /// full entry.
     pub fn list(&self) -> Vec<InterceptEntry> {
         self.queue
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
-            .clone()
+            .iter()
+            .map(|entry| {
+                let mut light = entry.clone();
+                light.body = String::new();
+                light
+            })
+            .collect()
+    }
+
+    /// Full held entry by id (including the body), used for detail/editing.
+    pub fn get(&self, id: &str) -> Option<InterceptEntry> {
+        self.queue
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
     }
 
     pub fn len(&self) -> usize {

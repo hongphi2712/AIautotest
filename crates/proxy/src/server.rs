@@ -642,6 +642,7 @@ impl ProxyServer {
                     &request_body[..request_body.len().min(INTERCEPT_BODY_CAP)],
                 )
                 .into_owned(),
+                body_len: request_body.len(),
                 timestamp: chrono::Utc::now(),
             };
             let rx = self.intercept.enqueue(entry);
@@ -709,6 +710,7 @@ impl ProxyServer {
                     &full_body[..full_body.len().min(INTERCEPT_BODY_CAP)],
                 )
                 .into_owned(),
+                body_len: full_body.len(),
                 timestamp: chrono::Utc::now(),
             };
             let rx = self.intercept.enqueue(entry);

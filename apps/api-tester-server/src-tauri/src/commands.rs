@@ -476,6 +476,14 @@ pub fn intercept_list(state: State<'_, AppState>) -> Result<Vec<InterceptEntry>,
 }
 
 #[tauri::command]
+pub fn intercept_detail(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<InterceptEntry>, String> {
+    Ok(state.intercept.get(&id))
+}
+
+#[tauri::command]
 pub fn intercept_forward(
     state: State<'_, AppState>,
     id: String,
