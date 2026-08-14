@@ -1,0 +1,37 @@
+[package]
+name = "api-tester-scanner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+api-tester-analysis.workspace = true
+api-tester-auth.workspace = true
+api-tester-domain.workspace = true
+api-tester-ports.workspace = true
+async-trait.workspace = true
+governor.workspace = true
+md5.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+api-tester-test-support.workspace = true
+async-trait.workspace = true
+criterion.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+[[bench]]
+name = "scanner"
+harness = false
+
+[lints]
+workspace = true

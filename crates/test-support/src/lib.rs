@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use api_tester_domain::{DomainEvent, HttpFlow, Session};
-use api_tester_ports::{EventPublisher, FlowRepository, PortError, SessionRepository};
+use api_tester_ports::{
+    EventPublisher, FlowRepository, HttpClient, HttpRequest, HttpResponse, PortError,
+    SessionRepository,
+};
 use async_trait::async_trait;
 
 #[derive(Default)]
@@ -88,5 +91,45 @@ impl EventPublisher for RecordingEventPublisher {
             .map_err(|_| PortError::Permanent("event publisher mutex poisoned".to_owned()))?
             .push(event);
         Ok(())
+    }
+}
+
+/// In-memory `HttpClient` returning queued responses in order. Useful for
+/// testing auth and scanner logic without any real network access.
+#[derive(Default)]
+pub struct MockHttpClient {
+    responses: Mutex<Vec<HttpResponse>>,
+}
+
+impl MockHttpClient {
+    pub fn with_responses(responses: Vec<HttpResponse>) -> Self {
+        Self {
+            responses: Mutex::new(responses),
+        }
+    }
+
+    pub fn push(&self, response: HttpResponse) {
+        self.responses
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push(response);
+    }
+}
+
+#[async_trait]
+impl HttpClient for MockHttpClient {
+    async fn send(&self, _request: HttpRequest) -> Result<HttpResponse, PortError> {
+        let mut responses = self
+            .responses
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if responses.is_empty() {
+            return Ok(HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Vec::new(),
+            });
+        }
+        Ok(responses.remove(0))
     }
 }

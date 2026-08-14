@@ -1,9 +1,10 @@
-use api_tester_domain::ScopeConfig;
 use regex::Regex;
 
-use crate::error::ProxyError;
+use crate::DomainError;
+use crate::config::ScopeConfig;
 
-/// Target scope filtering, matching the Python reference semantics.
+/// Target scope filtering, matching the Python reference semantics. Shared by
+/// the proxy (capture filtering) and the scanner (scope guardrails).
 ///
 /// Semantics:
 /// - `exclude_*` patterns win over `include_*` patterns.
@@ -17,7 +18,7 @@ pub struct ScopeFilter {
 }
 
 impl ScopeFilter {
-    pub fn new(config: ScopeConfig) -> Result<Self, ProxyError> {
+    pub fn new(config: ScopeConfig) -> Result<Self, DomainError> {
         Ok(Self {
             include_hosts: compile(&config.include_hosts)?,
             exclude_hosts: compile(&config.exclude_hosts)?,
@@ -60,17 +61,17 @@ impl ScopeFilter {
     }
 }
 
-fn compile(patterns: &[String]) -> Result<Vec<Regex>, ProxyError> {
+fn compile(patterns: &[String]) -> Result<Vec<Regex>, DomainError> {
     patterns
         .iter()
-        .map(|pattern| Regex::new(pattern).map_err(|error| ProxyError::Regex(error.to_string())))
+        .map(|pattern| Regex::new(pattern).map_err(|error| DomainError::Regex(error.to_string())))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::ScopeFilter;
-    use api_tester_domain::ScopeConfig;
+    use crate::config::ScopeConfig;
 
     #[test]
     fn include_hosts_are_required_when_set() {
@@ -186,5 +187,16 @@ mod tests {
         assert!(combined.should_capture("api.target.com", "/data"));
         assert!(!combined.should_capture("api.target.com", "/bundle.js"));
         assert!(!combined.should_capture("other.com", "/data"));
+    }
+
+    #[test]
+    fn invalid_pattern_is_typed_error() {
+        assert!(
+            ScopeFilter::new(ScopeConfig {
+                include_hosts: vec!["(".to_owned()],
+                ..ScopeConfig::default()
+            })
+            .is_err()
+        );
     }
 }

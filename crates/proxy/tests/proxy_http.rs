@@ -3,7 +3,9 @@ mod common;
 use std::sync::Arc;
 
 use api_tester_domain::{ProxyConfig, ScopeConfig};
-use common::{MockHttpUpstream, VecCaptureSink, send_plain, send_plain_with_body, start_proxy};
+use common::{
+    MockHttpUpstream, VecCaptureSink, send_plain, send_plain_with_body, start_proxy, wait_for_flows,
+};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::test]
@@ -28,7 +30,7 @@ async fn http_forward_and_capture() {
     assert!(response.contains(r#"{"received":true}"#));
     assert!(!upstream.received.lock().unwrap().is_empty());
 
-    let flows = sink.flows();
+    let flows = wait_for_flows(&sink, 1).await;
     assert_eq!(flows.len(), 1);
     let flow = &flows[0];
     assert_eq!(flow.path, "/api/test");
@@ -69,7 +71,7 @@ async fn http_post_body_is_captured() {
 
     assert!(response.contains("200 OK"), "got: {response}");
 
-    let flows = sink.flows();
+    let flows = wait_for_flows(&sink, 1).await;
     assert_eq!(flows.len(), 1);
     let flow = &flows[0];
     assert_eq!(flow.method.as_str(), "POST");
@@ -135,8 +137,45 @@ async fn http_keep_alive_captures_each_request() {
     drop(socket);
 
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    let flows = sink.flows();
+    let flows = wait_for_flows(&sink, 2).await;
     assert_eq!(flows.len(), 2, "each keep-alive request must be captured");
     assert_eq!(flows[0].path, "/api/keep/0");
     assert_eq!(flows[1].path, "/api/keep/1");
+}
+
+#[tokio::test]
+async fn large_response_relays_full_but_capture_is_capped() {
+    let upstream = MockHttpUpstream::start_with_body_size(2000).await;
+    let sink = Arc::new(VecCaptureSink::default());
+    let proxy = start_proxy(
+        ProxyConfig {
+            port: 0,
+            max_body_bytes: 100,
+            ..ProxyConfig::default()
+        },
+        ScopeConfig::default(),
+        sink.clone(),
+    )
+    .await;
+    let proxy_addr = proxy.local_addr().await.unwrap();
+
+    let target = format!("127.0.0.1:{}", upstream.port);
+    let response = send_plain(proxy_addr, &target, "GET", "/api/big").await;
+
+    let body_start = response
+        .find("\r\n\r\n")
+        .map(|index| index + 4)
+        .unwrap_or(0);
+    let relayed = response.len().saturating_sub(body_start);
+    assert!(
+        relayed >= 2000,
+        "client must receive the full body, got {relayed} bytes"
+    );
+
+    let flows = wait_for_flows(&sink, 1).await;
+    let flow = &flows[0];
+    assert!(
+        flow.response_body.as_deref().map(str::len).unwrap_or(0) <= 100,
+        "capture must be capped at max_body_bytes"
+    );
 }

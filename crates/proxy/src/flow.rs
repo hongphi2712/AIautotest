@@ -52,7 +52,7 @@ impl FlowBuilder {
         let response_body = parts
             .response_body
             .map(|body| decode_body(body, &encoding, self.max_body_bytes))
-            .map(|decoded| String::from_utf8_lossy(&decoded).into_owned());
+            .map(decoded_to_string);
         let request_body = parts
             .request_body
             .map(|body| String::from_utf8_lossy(body).into_owned());
@@ -92,6 +92,15 @@ fn default_flow_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
+/// Converts a decoded body into a `String`, reusing the buffer allocation
+/// when the bytes are valid UTF-8 (avoids one full-body copy per response).
+fn decoded_to_string(decoded: Vec<u8>) -> String {
+    match String::from_utf8(decoded) {
+        Ok(text) => text,
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+    }
+}
+
 fn headers_to_vec(headers: &http::HeaderMap) -> Vec<Header> {
     let mut out = Vec::new();
     for name in headers.keys() {
@@ -106,8 +115,48 @@ fn headers_to_vec(headers: &http::HeaderMap) -> Vec<Header> {
 }
 
 fn headers_to_map(headers: &[Header]) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .map(|header| (header.name.clone(), header.value.clone()))
+    let mut multi: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for header in headers {
+        multi
+            .entry(header.name.clone())
+            .or_default()
+            .push(header.value.clone());
+    }
+    multi
+        .into_iter()
+        .map(|(name, values)| (name, values.join(", ")))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::headers_to_map;
+    use crate::http::parse::Header;
+
+    #[test]
+    fn duplicate_header_values_are_joined() {
+        let headers = vec![
+            Header::new("set-cookie", "a=1; Path=/"),
+            Header::new("set-cookie", "b=2; Path=/"),
+        ];
+        let map = headers_to_map(&headers);
+        assert_eq!(
+            map.get("set-cookie").map(String::as_str),
+            Some("a=1; Path=/, b=2; Path=/")
+        );
+    }
+
+    #[test]
+    fn distinct_headers_are_preserved() {
+        let headers = vec![
+            Header::new("Content-Type", "application/json"),
+            Header::new("X-Trace", "abc"),
+        ];
+        let map = headers_to_map(&headers);
+        assert_eq!(
+            map.get("Content-Type").map(String::as_str),
+            Some("application/json")
+        );
+        assert_eq!(map.get("X-Trace").map(String::as_str), Some("abc"));
+    }
 }

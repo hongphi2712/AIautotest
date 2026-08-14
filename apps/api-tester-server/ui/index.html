@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API-AutoTester</title>
+<style>
+  :root {
+    --bg: #f5f5f6;
+    --panel: #ffffff;
+    --panel-2: #eceff1;
+    --panel-3: #f8f9fa;
+    --border: #d3d7db;
+    --border-2: #c3c9cf;
+    --text: #23272e;
+    --muted: #5b6470;
+    --accent: #f97316;
+    --accent-dark: #ea580c;
+    --blue: #1976d2;
+    --green: #16a34a;
+    --red: #dc2626;
+    --orange: #d97706;
+    --mono: "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    overflow: hidden;
+  }
+  button { font-family: inherit; }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    display: flex; align-items: stretch; gap: 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    min-height: 46px;
+  }
+  .brand {
+    display: flex; align-items: center; padding: 0 16px;
+    font-weight: 700; font-size: 15px; letter-spacing: .2px;
+    color: #fff; background: #16181d;
+    border-right: 1px solid #2b2f37;
+  }
+  .wtabs { display: flex; align-items: stretch; overflow-x: auto; flex: 1; }
+  .wt {
+    border: 0; background: transparent; color: var(--muted);
+    padding: 0 14px; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+    border-bottom: 2px solid transparent;
+  }
+  .wt:hover { color: var(--text); }
+  .wt.active { color: var(--accent-dark); border-bottom-color: var(--accent); font-weight: 600; }
+  .top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.running { color: var(--green); border-color: #b7e0c5; background: #f0faf3; }
+  .pill.running .dot { background: var(--green); }
+
+  /* ---------- body ---------- */
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* ---------- sidebar ---------- */
+  .dash-body { display: flex; flex: 1; min-height: 0; }
+  .dash-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .dash-body .sidebar { border-right: 0; border-left: 1px solid var(--border); }
+  .sidebar {
+    width: 228px; min-width: 228px; background: var(--panel);
+    border-right: 1px solid var(--border); display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-head { padding: 10px 12px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .sidebar .new-task { margin: 2px 10px 4px; text-align: left; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 4px; padding: 7px 10px; font-size: 12px; cursor: pointer; }
+  .sidebar .new-task:hover { border-color: var(--accent); color: var(--accent-dark); }
+  .task-item { padding: 8px 10px; margin: 2px 6px; border-radius: 4px; cursor: pointer; border: 1px solid transparent; }
+  .task-item:hover { background: var(--panel-3); }
+  .task-item.selected { background: #fdeee2; border-color: #f7d4b8; }
+  .task-item .t-name { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .task-item .t-name .t-status { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .task-item .t-status.running { background: var(--green); }
+  .task-item .t-status.completed { background: var(--blue); }
+  .task-item .t-status.stopped { background: var(--red); }
+  .task-item .t-status.idle { background: var(--muted); }
+  .task-item .t-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .task-item .t-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .task-item .t-actions button { font-size: 10.5px; padding: 2px 7px; border: 1px solid var(--border); background: var(--panel); border-radius: 3px; cursor: pointer; color: var(--muted); }
+  .task-item .t-actions button:hover { color: var(--accent-dark); border-color: var(--accent); }
+
+  /* ---------- main workspace ---------- */
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .view { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .view.active { display: flex; }
+
+  /* task header */
+  .task-header { padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .task-header h2 { margin: 0 0 4px; font-size: 15px; }
+  .task-header .th-meta { font-size: 12px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; }
+  .task-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); padding: 0 12px; }
+  .task-tabs button { border: 0; background: transparent; padding: 8px 14px; font-size: 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+  .task-tabs button.active { color: var(--accent-dark); border-bottom-color: var(--accent); font-weight: 600; }
+  .task-pane { display: none; flex: 1; min-height: 0; }
+  .task-pane.active { display: block; }
+
+  /* empty state */
+  .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted); padding: 40px; text-align: center; }
+  .empty .big { font-size: 34px; margin-bottom: 10px; opacity: .5; }
+  .empty h3 { margin: 0 0 6px; color: var(--text); font-weight: 600; }
+  .empty p { margin: 0; font-size: 12.5px; max-width: 420px; line-height: 1.5; }
+  .empty code { background: var(--panel-2); padding: 2px 6px; border-radius: 3px; font-family: var(--mono); font-size: 11px; }
+
+  /* summary grid */
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px 16px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+  .stat .s-val { font-size: 22px; font-weight: 700; }
+  .stat .s-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
+
+  /* ---------- logger table ---------- */
+  .logger-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .toolbar strong { font-size: 12px; margin-right: 4px; }
+  .toolbar button { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+  .toolbar button:hover { border-color: var(--accent); }
+  .toolbar input, .toolbar select { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--text); }
+  .table-scroll { flex: 1; overflow: auto; position: relative; }
+  table.flows { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+  table.flows th { position: sticky; top: 0; background: var(--panel-2); color: var(--muted); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 11px; z-index: 2; overflow: hidden; }
+  table.flows td { padding: 3px 6px; border-bottom: 1px solid #eef0f2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.flows tr { height: 27px; }
+  table.flows tr:hover { background: #edf5ff; }
+  table.flows tr.selected { background: #c9def5; }
+  /* column sizing — set on th only, td inherits */
+  th.col-num { width: 36px; }
+  th.col-host { width: 130px; }
+  th.col-method { width: 52px; }
+  th.col-url { } /* remaining space */
+  th.col-status { width: 48px; }
+  th.col-length { width: 52px; }
+  th.col-mime { width: 140px; }
+  th.col-cookies { width: 68px; }
+  th.col-time { width: 76px; }
+  .method { font-weight: 600; }
+  .method.GET { color: #1a5fb4; }
+  .method.POST { color: #16803c; }
+  .method.PUT { color: var(--orange); }
+  .method.DELETE { color: var(--red); }
+  .status-2 { color: var(--green); }
+  .status-4, .status-5 { color: var(--red); }
+  .status-3 { color: var(--orange); }
+
+  /* intercept table (7 cols) */
+  .intercept-flows th.col-num { width: 36px; }
+  .intercept-flows th.col-time { width: 90px; }
+  .intercept-flows th.col-type { width: 48px; }
+  .intercept-flows th.col-direction { width: 68px; }
+  .intercept-flows th.col-method { width: 62px; }
+  .intercept-flows th.col-url { }
+  .intercept-flows th.col-status { width: 62px; }
+  .intercept-flows th.col-length { width: 52px; }
+
+  /* inspector */
+  .inspector-layout { display: flex; align-items: stretch; position: relative; min-height: 260px; max-height: 45vh; border-top: 1px solid var(--border); background: var(--panel); overflow: hidden; }
+  .rv-panel { display: flex; flex-direction: column; flex: 0 0 auto; min-width: 0; min-height: 0; overflow: hidden; }
+  .rv-header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-weight: 600; font-size: 12px; background: var(--panel-3); border-bottom: 1px solid var(--border); }
+  .rv-header .rv-title { flex: 1; }
+  .rv-action { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 11px; }
+  .rv-action:hover { border-color: var(--accent); }
+  .rv-pane { display: none; flex: 1; min-height: 0; }
+  .rv-pane.active { display: flex; }
+  .rv-pane pre { flex: 1; min-height: 0; border: 0; border-radius: 0; margin: 0; padding: 10px; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; overflow-x: hidden; overflow-y: auto; }
+  .rv-pane pre .tok-key { color: var(--blue); }
+  .rv-pane pre .tok-str { color: var(--green); }
+  .rv-pane pre .tok-num { color: var(--orange); }
+  .rv-pane pre .tok-lit { color: var(--red); }
+  .rv-pane .render-frame { border: 0; min-height: 0; flex: 1; width: 100%; }
+  .resizer { flex: 0 0 6px; cursor: col-resize; background: var(--border); }
+  .resizer:hover, .resizer.active { background: var(--accent); }
+  body.resizing { cursor: col-resize; user-select: none; }
+  .intercept-edit-overlay { position: absolute; inset: 0; background: var(--panel); z-index: 5; display: none; }
+  .intercept-edit-overlay.active { display: block; }
+  .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); background: var(--panel-3); }
+  .subtab { border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--muted); padding: 6px 12px; cursor: pointer; font-size: 11.5px; }
+  .subtab.active { color: var(--accent-dark); border-bottom-color: var(--accent); font-weight: 600; }
+  pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; overflow: auto; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; margin: 0; }
+  .render-frame { width: 100%; min-height: 260px; border: 1px solid var(--border); background: #fff; }
+  .inspector-sidebar { flex: 0 0 auto; background: var(--panel); overflow-y: auto; overflow-x: hidden; }
+  .inspector-title { padding: 8px 12px; font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--border); }
+  .inspector-group { border-bottom: 1px solid var(--border); }
+  .inspector-group summary { padding: 8px 12px; cursor: pointer; color: var(--text); font-size: 12px; font-weight: 600; }
+  .inspector-content { padding: 4px 12px 10px; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; }
+  .cookie-table { width: 100%; border-collapse: collapse; }
+  .cookie-table th, .cookie-table td { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: left; font-size: 11px; }
+  .action { float: right; background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 11px; }
+  .action:hover { background: var(--accent-dark); }
+
+  /* repeater */
+  .repeater { padding: 14px; background: var(--panel); overflow: auto; }
+  .repeater-grid { display: grid; grid-template-columns: 90px 1fr; gap: 8px; }
+  .repeater label { color: var(--muted); font-size: 11px; padding-top: 8px; }
+  .repeater input, .repeater textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 8px; font: 12px var(--mono); }
+  .repeater textarea { min-height: 90px; resize: vertical; }
+  .repeater h3 { font-size: 12px; margin: 14px 0 6px; }
+
+  /* proxy view */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; margin: 14px 16px; padding: 14px; }
+  .panel h3 { margin: 0 0 10px; font-size: 13px; }
+  .field-grid { display: grid; grid-template-columns: 160px 1fr; gap: 8px; align-items: center; max-width: 520px; }
+  .field-grid label { color: var(--muted); font-size: 12px; }
+  .field-grid input { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; font-size: 12px; color: var(--text); }
+  .btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 4px; padding: 7px 14px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-dark); }
+  .btn.danger { background: #fdecea; border-color: #f5c6c2; color: #b3261e; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .muted { color: var(--muted); font-size: 12px; }
+
+  /* status bar */
+  .statusbar { min-height: 26px; padding: 5px 14px; border-top: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 11.5px; display: flex; gap: 24px; align-items: center; }
+  .statusbar .ok { color: var(--green); }
+  .statusbar .warn { color: var(--orange); }
+
+  .error-banner { display: none; padding: 8px 14px; background: #3a1d20; color: #ffb4b4; border-bottom: 1px solid var(--red); font-size: 12px; }
+  .error-banner.visible { display: block; }
+
+  /* ---------- proxy sub-tabs ---------- */
+  .proxy-subtabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); padding: 0 12px; }
+  .proxy-subtab { border: 0; background: transparent; padding: 8px 14px; font-size: 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+  .proxy-subtab:hover { color: var(--text); }
+  .proxy-subtab.active { color: var(--accent-dark); border-bottom-color: var(--accent); font-weight: 600; }
+  .proxy-subpane { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .proxy-subpane.active { display: flex; }
+
+  /* ---------- intercept control bar ---------- */
+  .intercept-bar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); min-height: 38px; }
+  .intercept-bar .intercept-left { display: flex; align-items: center; gap: 6px; }
+  .intercept-bar .intercept-right { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; color: var(--muted); }
+  .intercept-bar .intercept-right .request-info { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn.intercept-on { background: #1976d2; color: #fff; border-color: #1976d2; min-width: 100px; }
+  .btn.intercept-on:hover { background: #1565c0; }
+  .btn.intercept-on.active { background: #1976d2; }
+  .btn.intercept-on.inactive { background: #9e9e9e; border-color: #9e9e9e; }
+  .btn.forward { background: #e65100; color: #fff; border-color: #e65100; }
+  .btn.forward:hover { background: #bf360c; }
+  .btn.drop { background: #757575; color: #fff; border-color: #757575; }
+  .btn.drop:hover { background: #616161; }
+  .intercept-warning { padding: 6px 12px; font-size: 12px; color: #e65100; background: rgba(230,81,0,.12); border-bottom: 1px solid var(--border); }
+  .history-detail-bar { padding: 8px 12px; font-size: 12px; font-weight: 600; background: var(--panel-3); border-bottom: 1px solid var(--border); color: var(--text); }
+  .mono { font-family: monospace; }
+  .edit-form { padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+  .edit-row { display: flex; align-items: center; gap: 8px; }
+  .edit-row label { width: 90px; flex: none; font-size: 12px; color: var(--muted); }
+  .edit-row input, .edit-row textarea { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--text); width: 100%; box-sizing: border-box; }
+
+  /* custom element hosts (component slices) fill their flex parents */
+  intercept-view, history-view, dashboard-view, repeater-view, proxy-settings-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  message-viewer { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  intercept-view message-viewer { flex: none; min-height: 260px; }
+  task-sidebar { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">API-AutoTester</div>
+    <nav class="wtabs">
+      <button class="wt active" data-tab="dashboard">Dashboard</button>
+      <button class="wt" data-tab="target">Target</button>
+      <button class="wt" data-tab="proxy">Proxy</button>
+      <button class="wt" data-tab="repeater">Repeater</button>
+      <button class="wt" data-tab="scanner">Scanner</button>
+      <button class="wt" data-tab="analyzer">Analyzer</button>
+      <button class="wt" data-tab="reports">Reports</button>
+    </nav>
+    <div class="top-right"><span id="proxy-pill" class="pill"><span class="dot"></span><span id="proxy-pill-text">Proxy: stopped</span></span></div>
+  </header>
+
+  <div id="error-banner" class="error-banner"></div>
+
+  <div class="body">
+    <main id="workspace">
+      <!-- Dashboard -->
+      <section id="view-dashboard" class="view active">
+        <dashboard-view></dashboard-view>
+      </section>
+
+
+      <!-- Target -->
+      <section id="view-target" class="view"><div class="empty"><div class="big">◎</div><h3>Target</h3><p>Define target scope (include/exclude hosts and paths) for captures and scans.</p></div></section>
+
+      <!-- Proxy -->
+      <section id="view-proxy" class="view">
+        <div class="proxy-subtabs">
+          <button class="proxy-subtab active" data-subtab="intercept">Intercept</button>
+          <button class="proxy-subtab" data-subtab="http-history">HTTP history</button>
+          <button class="proxy-subtab" data-subtab="ws-history">WebSockets history</button>
+          <button class="proxy-subtab" data-subtab="match-replace">Match and replace</button>
+          <button class="proxy-subtab" data-subtab="proxy-settings">Proxy settings</button>
+        </div>
+
+        <!-- Intercept sub-pane -->
+        <div id="sub-intercept" class="proxy-subpane active">
+          <intercept-view></intercept-view>
+        </div>
+
+        <!-- HTTP history sub-pane (moved from Logger) -->
+        <div id="sub-http-history" class="proxy-subpane">
+          <history-view></history-view>
+        </div>
+
+        <!-- WebSockets history (stub) -->
+        <div id="sub-ws-history" class="proxy-subpane">
+          <div class="empty"><div class="big">⇄</div><h3>WebSockets history</h3><p>WebSocket captures will appear here.</p></div>
+        </div>
+
+        <!-- Match and replace (stub) -->
+        <div id="sub-match-replace" class="proxy-subpane">
+          <div class="empty"><div class="big">⇄</div><h3>Match and replace</h3><p>Match and replace rules are loaded from <code>config.json</code>. Rules are applied to requests before forwarding and to responses before relaying.</p></div>
+        </div>
+
+        <!-- Proxy settings (moved from old Proxy view) -->
+        <div id="sub-proxy-settings" class="proxy-subpane">
+          <proxy-settings-view></proxy-settings-view>
+        </div>
+      </section>
+
+      <!-- Repeater -->
+      <section id="view-repeater" class="view">
+        <repeater-view></repeater-view>
+      </section>
+
+      <!-- Scanner -->
+      <section id="view-scanner" class="view"><div class="empty"><div class="big">⇄</div><h3>Scanner</h3><p>The scanner engine runs replay and mutation scans with scope guardrails, budgets and rate limits. Configure skills and targets to start a scan.</p><p style="margin-top:8px"><code>start_proxy</code> + <code>scan</code> from the CLI or create a task from the sidebar.</p></div></section>
+
+
+      <!-- Analyzer -->
+      <section id="view-analyzer" class="view"><div class="empty"><div class="big">◔</div><h3>Analyzer</h3><p>Token extraction, parameter classification and dependency analysis run here.</p></div></section>
+
+      <!-- Reports -->
+      <section id="view-reports" class="view"><div class="empty"><div class="big">▤</div><h3>Reports</h3><p>JSON, HTML and Mermaid report generation will appear here.</p></div></section>
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <span id="sb-proxy" class="warn">Proxy: stopped</span>
+    <span id="sb-flows">0 captured</span>
+    <span id="sb-selection">No selection</span>
+    <span>HTTPS interception enabled</span>
+    <span style="margin-left:auto">Desktop UI · Tauri</span>
+  </footer>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
+

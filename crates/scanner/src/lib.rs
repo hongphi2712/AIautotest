@@ -1,0 +1,25 @@
+pub mod budget;
+pub mod dedup;
+pub mod error;
+pub mod mutation_engine;
+pub mod payload_source;
+pub mod rate_limit;
+pub mod replay;
+pub mod request_executor;
+pub mod response_verifier;
+pub mod scan_executor;
+pub mod scheduler;
+pub mod scope_guard;
+
+pub use budget::BudgetTracker;
+pub use dedup::RequestDedup;
+pub use error::ScanError;
+pub use mutation_engine::{Mutation, MutationEngine};
+pub use payload_source::{BuiltinPayloadSource, PayloadSource, PayloadTemplate};
+pub use rate_limit::HostRateLimiter;
+pub use replay::{ReplayOutcome, Replayer};
+pub use request_executor::RequestExecutor;
+pub use response_verifier::ResponseVerifier;
+pub use scan_executor::TokioScanExecutor;
+pub use scheduler::{ScanResult, ScanScheduler, StopReason};
+pub use scope_guard::ScopeGuard;

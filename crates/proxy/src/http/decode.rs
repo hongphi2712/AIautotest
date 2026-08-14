@@ -16,10 +16,13 @@ pub fn content_encoding(headers: &[Header]) -> String {
 /// Decodes a body for gzip/deflate (brotli is a no-op fallback), then caps
 /// the result at `max` bytes. A failed decompression falls back to the raw
 /// bytes so the flow is never lost.
+///
+/// The decompressor reads at most `max + 1` output bytes so a small
+/// decompression bomb can never allocate unbounded memory.
 pub fn decode_body(body: &[u8], encoding: &str, max: usize) -> Vec<u8> {
     let mut decoded = match encoding {
-        "gzip" => inflate_gzip(body).unwrap_or_else(|| body.to_vec()),
-        "deflate" => inflate_zlib(body).unwrap_or_else(|| body.to_vec()),
+        "gzip" => inflate_gzip(body, max).unwrap_or_else(|| body.to_vec()),
+        "deflate" => inflate_zlib(body, max).unwrap_or_else(|| body.to_vec()),
         _ => body.to_vec(),
     };
     if decoded.len() > max {
@@ -28,15 +31,15 @@ pub fn decode_body(body: &[u8], encoding: &str, max: usize) -> Vec<u8> {
     decoded
 }
 
-fn inflate_gzip(body: &[u8]) -> Option<Vec<u8>> {
-    let mut decoder = GzDecoder::new(body);
+fn inflate_gzip(body: &[u8], max: usize) -> Option<Vec<u8>> {
+    let mut decoder = GzDecoder::new(body).take(max as u64 + 1);
     let mut out = Vec::new();
     decoder.read_to_end(&mut out).ok()?;
     Some(out)
 }
 
-fn inflate_zlib(body: &[u8]) -> Option<Vec<u8>> {
-    let mut decoder = ZlibDecoder::new(body);
+fn inflate_zlib(body: &[u8], max: usize) -> Option<Vec<u8>> {
+    let mut decoder = ZlibDecoder::new(body).take(max as u64 + 1);
     let mut out = Vec::new();
     decoder.read_to_end(&mut out).ok()?;
     Some(out)
@@ -70,5 +73,22 @@ mod tests {
     fn failed_decompress_falls_back_to_raw() {
         let decoded = decode_body(b"not-gzip", "gzip", 1024);
         assert_eq!(decoded, b"not-gzip");
+    }
+
+    #[test]
+    fn decompression_bomb_is_bounded() {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let huge = vec![b'x'; 1 << 20];
+        encoder.write_all(&huge).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(compressed.len() < huge.len(), "sanity: must compress");
+
+        let decoded = decode_body(&compressed, "gzip", 1024);
+
+        assert!(
+            decoded.len() <= 1024,
+            "output must stay capped, got {}",
+            decoded.len()
+        );
     }
 }

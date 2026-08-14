@@ -1,0 +1,35 @@
+[package]
+name = "api-tester-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+api-tester-analysis.workspace = true
+api-tester-capture.workspace = true
+api-tester-config.workspace = true
+api-tester-domain.workspace = true
+api-tester-events.workspace = true
+api-tester-ports.workspace = true
+api-tester-proxy.workspace = true
+api-tester-storage.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { workspace = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+open.workspace = true
+
+[dev-dependencies]
+api-tester-test-support.workspace = true
+
+[lints]
+workspace = true

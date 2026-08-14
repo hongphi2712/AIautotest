@@ -4,6 +4,7 @@ mod event;
 mod http_flow;
 mod models;
 mod scan;
+mod scope;
 
 pub use config::{
     AppConfig, BrowserConfig, BufferConfig, DEFAULT_BUFFER_DEDUP_LIMIT, DEFAULT_BUFFER_MAX_BYTES,
@@ -20,4 +21,5 @@ pub use models::{
     AnalyzedParam, ExtractedToken, Finding, FlowDependency, InjectionLocation, ParamType, Payload,
     Session, Severity, TokenType,
 };
-pub use scan::{ScanJob, ScanJobStatus};
+pub use scan::{ScanConfig, ScanJob, ScanJobStatus};
+pub use scope::ScopeFilter;

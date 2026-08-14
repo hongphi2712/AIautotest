@@ -2,8 +2,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
-    #[error("invalid regex pattern: {0}")]
-    Regex(String),
     #[error("certificate error: {0}")]
     Cert(String),
     #[error("upstream error: {0}")]

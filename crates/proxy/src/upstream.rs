@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -15,6 +16,8 @@ use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme
 use api_tester_domain::ProxyConfig;
 
 use crate::error::ProxyError;
+
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 
 type HttpsConnector = hyper_rustls::HttpsConnector<HttpConnector>;
 pub type UpstreamRequest = Request<Full<Bytes>>;
@@ -40,9 +43,9 @@ impl UpstreamClient {
     }
 
     pub async fn send(&self, request: UpstreamRequest) -> Result<Response<Incoming>, ProxyError> {
-        self.client
-            .request(request)
+        tokio::time::timeout(UPSTREAM_TIMEOUT, self.client.request(request))
             .await
+            .map_err(|_| ProxyError::Upstream("upstream request timed out".to_owned()))?
             .map_err(|error| ProxyError::Upstream(error.to_string()))
     }
 }

@@ -228,6 +228,16 @@ impl FlowBuffer {
             dedup_len,
         }
     }
+
+    /// A consistent copy of the buffered flows, used by the dashboard.
+    pub fn snapshot(&self) -> Vec<HttpFlow> {
+        self.queue
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
 }
 
 pub type SharedFlowBuffer = Arc<FlowBuffer>;
@@ -368,6 +378,17 @@ mod tests {
         assert_eq!(stats.capacity, 64);
         assert_eq!(stats.max_bytes, 4_096);
         assert_eq!(buffer.dedup_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn snapshot_returns_consistent_copy() {
+        let buffer = FlowBuffer::new(3, false, OverflowPolicy::DropOldest);
+        buffer.push(flow(1)).await;
+        buffer.push(flow(2)).await;
+        buffer.push(flow(3)).await;
+        buffer.push(flow(4)).await;
+        assert_eq!(buffer.snapshot().len(), 3);
+        assert_eq!(buffer.snapshot()[0].path, "/api/2");
     }
 
     #[tokio::test]

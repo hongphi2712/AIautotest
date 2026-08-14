@@ -1,21 +1,99 @@
-use std::collections::BTreeMap;
+use http::header::{HeaderMap, HeaderName, HeaderValue};
 
-use api_tester_domain::{
-    MatchCondition, MatchConditionType, MatchRule, ReplaceAction, ReplaceActionType, RuleDirection,
-};
+use api_tester_domain::{MatchConditionType, MatchRule, ReplaceActionType, RuleDirection};
 use regex::Regex;
 
-pub type HeaderMap = BTreeMap<String, String>;
-
 /// Applies match & replace rules to requests and responses, mirroring the
-/// Python reference engine.
+/// Python reference engine. All rule regexes are compiled once at engine
+/// construction so hot-path matching never recompiles a pattern. The engine
+/// operates on `http::HeaderMap` so duplicate header values survive rule
+/// application and forwarding.
 pub struct MatchReplaceEngine {
     rules: Vec<MatchRule>,
+    compiled: Vec<CompiledRule>,
+}
+
+struct CompiledRule {
+    direction: RuleDirection,
+    condition: CompiledCondition,
+    action: CompiledAction,
+}
+
+enum CompiledCondition {
+    Always,
+    Header {
+        header: Option<HeaderName>,
+        pattern: Option<Regex>,
+    },
+    PathPattern(Option<Regex>),
+    BodyRegex(Option<Regex>),
+}
+
+enum CompiledAction {
+    SetHeader {
+        header: Option<HeaderName>,
+        value: Option<HeaderValue>,
+    },
+    RemoveHeader {
+        header: Option<HeaderName>,
+    },
+    ReplaceBody {
+        pattern: Option<Regex>,
+        replacement: String,
+    },
+    Noop,
+}
+
+impl CompiledCondition {
+    fn matches(&self, headers: &HeaderMap, path: &str, body: Option<&str>) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Header {
+                header: Some(name),
+                pattern: Some(re),
+            } => headers
+                .get(name)
+                .is_some_and(|value| re.is_match(value.to_str().unwrap_or_default())),
+            Self::Header { .. } => false,
+            Self::PathPattern(pattern) => pattern.as_ref().is_some_and(|re| re.is_match(path)),
+            Self::BodyRegex(pattern) => pattern
+                .as_ref()
+                .is_some_and(|re| body.is_some_and(|b| re.is_match(b))),
+        }
+    }
+}
+
+impl CompiledAction {
+    fn apply_headers(&self, headers: &mut HeaderMap) {
+        match self {
+            Self::SetHeader {
+                header: Some(name),
+                value: Some(value),
+            } => {
+                headers.insert(name.clone(), value.clone());
+            }
+            Self::RemoveHeader { header: Some(name) } => {
+                headers.remove(name);
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_body(&self, body: &mut String) {
+        if let Self::ReplaceBody {
+            pattern: Some(re),
+            replacement,
+        } = self
+        {
+            *body = re.replace_all(body, replacement.as_str()).into_owned();
+        }
+    }
 }
 
 impl MatchReplaceEngine {
     pub fn new(rules: Vec<MatchRule>) -> Self {
-        Self { rules }
+        let compiled = rules.iter().map(compile_rule).collect();
+        Self { rules, compiled }
     }
 
     pub fn rules(&self) -> &[MatchRule] {
@@ -23,11 +101,13 @@ impl MatchReplaceEngine {
     }
 
     pub fn add_rule(&mut self, rule: MatchRule) {
+        self.compiled.push(compile_rule(&rule));
         self.rules.push(rule);
     }
 
     pub fn remove_rule(&mut self, name: &str) {
         self.rules.retain(|rule| rule.name != name);
+        self.compiled = self.rules.iter().map(compile_rule).collect();
     }
 
     pub fn apply_to_request_headers(
@@ -37,12 +117,12 @@ impl MatchReplaceEngine {
         body: Option<&str>,
     ) -> HeaderMap {
         let mut result = headers.clone();
-        for rule in &self.rules {
+        for rule in &self.compiled {
             if rule.direction != RuleDirection::Request {
                 continue;
             }
-            if self.matches(&rule.r#match, &result, path, body) {
-                apply_header_action(&rule.action, &mut result);
+            if rule.condition.matches(&result, path, body) {
+                rule.action.apply_headers(&mut result);
             }
         }
         result
@@ -50,12 +130,12 @@ impl MatchReplaceEngine {
 
     pub fn apply_to_response_headers(&self, headers: &HeaderMap, path: &str) -> HeaderMap {
         let mut result = headers.clone();
-        for rule in &self.rules {
+        for rule in &self.compiled {
             if rule.direction != RuleDirection::Response {
                 continue;
             }
-            if self.matches(&rule.r#match, &result, path, None) {
-                apply_header_action(&rule.action, &mut result);
+            if rule.condition.matches(&result, path, None) {
+                rule.action.apply_headers(&mut result);
             }
         }
         result
@@ -66,79 +146,75 @@ impl MatchReplaceEngine {
         body: &str,
         direction: RuleDirection,
         headers: &HeaderMap,
+        path: &str,
     ) -> String {
         let mut result = body.to_owned();
-        for rule in &self.rules {
+        for rule in &self.compiled {
             if rule.direction != direction {
                 continue;
             }
-            if !self.matches(&rule.r#match, headers, "", Some(&result)) {
+            if !rule.condition.matches(headers, path, Some(&result)) {
                 continue;
             }
-            if rule.action.kind == ReplaceActionType::ReplaceBody {
-                if let (Some(pattern), Some(replacement)) =
-                    (&rule.action.pattern, &rule.action.replacement)
-                {
-                    if let Ok(re) = Regex::new(pattern) {
-                        result = re.replace_all(&result, replacement.as_str()).into_owned();
-                    }
-                }
-            }
+            rule.action.apply_body(&mut result);
         }
         result
     }
+}
 
-    fn matches(
-        &self,
-        condition: &MatchCondition,
-        headers: &HeaderMap,
-        path: &str,
-        body: Option<&str>,
-    ) -> bool {
-        match condition.kind {
-            MatchConditionType::Always => true,
-            MatchConditionType::Header => {
-                let Some(header) = condition.header.as_deref() else {
-                    return false;
-                };
-                let Some(pattern) = condition.pattern.as_deref() else {
-                    return false;
-                };
-                headers
-                    .get(header)
-                    .is_some_and(|value| Regex::new(pattern).is_ok_and(|re| re.is_match(value)))
-            }
-            MatchConditionType::PathPattern => condition
-                .pattern
+fn compile_rule(rule: &MatchRule) -> CompiledRule {
+    let condition = match rule.r#match.kind {
+        MatchConditionType::Always => CompiledCondition::Always,
+        MatchConditionType::Header => CompiledCondition::Header {
+            header: rule
+                .r#match
+                .header
                 .as_deref()
-                .is_some_and(|pattern| Regex::new(pattern).is_ok_and(|re| re.is_match(path))),
-            MatchConditionType::BodyRegex => {
-                let Some(pattern) = condition.pattern.as_deref() else {
-                    return false;
-                };
-                let Some(body) = body else {
-                    return false;
-                };
-                Regex::new(pattern).is_ok_and(|re| re.is_match(body))
-            }
+                .and_then(|name| HeaderName::try_from(name).ok()),
+            pattern: compile_optional(&rule.r#match.pattern),
+        },
+        MatchConditionType::PathPattern => {
+            CompiledCondition::PathPattern(compile_optional(&rule.r#match.pattern))
         }
+        MatchConditionType::BodyRegex => {
+            CompiledCondition::BodyRegex(compile_optional(&rule.r#match.pattern))
+        }
+    };
+    let action = match rule.action.kind {
+        ReplaceActionType::SetHeader => CompiledAction::SetHeader {
+            header: rule
+                .action
+                .header
+                .as_deref()
+                .and_then(|name| HeaderName::try_from(name).ok()),
+            value: rule
+                .action
+                .value
+                .as_deref()
+                .and_then(|value| HeaderValue::from_str(value).ok()),
+        },
+        ReplaceActionType::RemoveHeader => CompiledAction::RemoveHeader {
+            header: rule
+                .action
+                .header
+                .as_deref()
+                .and_then(|name| HeaderName::try_from(name).ok()),
+        },
+        ReplaceActionType::ReplaceBody => CompiledAction::ReplaceBody {
+            pattern: compile_optional(&rule.action.pattern),
+            replacement: rule.action.replacement.clone().unwrap_or_default(),
+        },
+        ReplaceActionType::ReplaceUrl => CompiledAction::Noop,
+    };
+    CompiledRule {
+        direction: rule.direction.clone(),
+        condition,
+        action,
     }
 }
 
-fn apply_header_action(action: &ReplaceAction, headers: &mut HeaderMap) {
-    match action.kind {
-        ReplaceActionType::SetHeader => {
-            if let (Some(name), Some(value)) = (&action.header, &action.value) {
-                headers.insert(name.clone(), value.clone());
-            }
-        }
-        ReplaceActionType::RemoveHeader => {
-            if let Some(name) = &action.header {
-                headers.remove(name);
-            }
-        }
-        ReplaceActionType::ReplaceBody | ReplaceActionType::ReplaceUrl => {}
-    }
+fn compile_optional(pattern: &Option<String>) -> Option<Regex> {
+    pattern.as_deref().and_then(|p| Regex::new(p).ok())
 }
 
 #[cfg(test)]
@@ -148,7 +224,22 @@ mod tests {
         MatchCondition, MatchConditionType, MatchRule, ReplaceAction, ReplaceActionType,
         RuleDirection,
     };
-    use std::collections::BTreeMap;
+    use http::header::{HeaderMap, HeaderName, HeaderValue};
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(
+                HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                HeaderValue::from_str(value).unwrap(),
+            );
+        }
+        map
+    }
+
+    fn value<'a>(map: &'a HeaderMap, name: &str) -> Option<&'a str> {
+        map.get(name).and_then(|value| value.to_str().ok())
+    }
 
     fn always_rule(action: ReplaceAction) -> MatchRule {
         MatchRule {
@@ -173,12 +264,12 @@ mod tests {
             replacement: None,
         };
         let engine = MatchReplaceEngine::new(vec![always_rule(action)]);
-        let headers = BTreeMap::from([("Host".to_owned(), "example.com".to_owned())]);
+        let request_headers = headers(&[("Host", "example.com")]);
 
-        let out = engine.apply_to_request_headers(&headers, "/api", None);
+        let out = engine.apply_to_request_headers(&request_headers, "/api", None);
 
-        assert_eq!(out.get("X-Test").map(String::as_str), Some("1"));
-        assert_eq!(out.get("Host").map(String::as_str), Some("example.com"));
+        assert_eq!(value(&out, "X-Test"), Some("1"));
+        assert_eq!(value(&out, "Host"), Some("example.com"));
     }
 
     #[test]
@@ -197,11 +288,34 @@ mod tests {
             action,
         };
         let engine = MatchReplaceEngine::new(vec![rule]);
-        let headers = BTreeMap::from([("Server".to_owned(), "nginx".to_owned())]);
+        let response_headers = headers(&[("Server", "nginx")]);
 
-        let out = engine.apply_to_response_headers(&headers, "/");
+        let out = engine.apply_to_response_headers(&response_headers, "/");
 
         assert!(!out.contains_key("Server"));
+    }
+
+    #[test]
+    fn duplicate_header_values_survive() {
+        let engine = MatchReplaceEngine::new(vec![]);
+        let mut response_headers = HeaderMap::new();
+        response_headers.append(
+            HeaderName::from_bytes(b"set-cookie").unwrap(),
+            HeaderValue::from_str("a=1").unwrap(),
+        );
+        response_headers.append(
+            HeaderName::from_bytes(b"set-cookie").unwrap(),
+            HeaderValue::from_str("b=2").unwrap(),
+        );
+
+        let out = engine.apply_to_response_headers(&response_headers, "/");
+
+        let values: Vec<&str> = out
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect();
+        assert_eq!(values, vec!["a=1", "b=2"]);
     }
 
     #[test]
@@ -215,7 +329,12 @@ mod tests {
         };
         let engine = MatchReplaceEngine::new(vec![always_rule(action)]);
 
-        let out = engine.apply_to_body("token=secret-42", RuleDirection::Request, &BTreeMap::new());
+        let out = engine.apply_to_body(
+            "token=secret-42",
+            RuleDirection::Request,
+            &HeaderMap::new(),
+            "/",
+        );
 
         assert_eq!(out, "token=REDACTED");
     }
@@ -240,16 +359,12 @@ mod tests {
         };
         let engine = MatchReplaceEngine::new(vec![rule]);
 
-        let matched = engine.apply_to_response_headers(
-            &BTreeMap::from([("Content-Type".to_owned(), "application/json".to_owned())]),
-            "/",
-        );
-        assert_eq!(matched.get("X-JSON").map(String::as_str), Some("true"));
+        let matched = engine
+            .apply_to_response_headers(&headers(&[("Content-Type", "application/json")]), "/");
+        assert_eq!(value(&matched, "X-JSON"), Some("true"));
 
-        let unmatched = engine.apply_to_response_headers(
-            &BTreeMap::from([("Content-Type".to_owned(), "text/html".to_owned())]),
-            "/",
-        );
+        let unmatched =
+            engine.apply_to_response_headers(&headers(&[("Content-Type", "text/html")]), "/");
         assert!(!unmatched.contains_key("X-JSON"));
     }
 
@@ -273,10 +388,10 @@ mod tests {
         };
         let engine = MatchReplaceEngine::new(vec![rule]);
 
-        let admin = engine.apply_to_request_headers(&BTreeMap::new(), "/admin/users", None);
-        assert_eq!(admin.get("X-Admin").map(String::as_str), Some("true"));
+        let admin = engine.apply_to_request_headers(&HeaderMap::new(), "/admin/users", None);
+        assert_eq!(value(&admin, "X-Admin"), Some("true"));
 
-        let public = engine.apply_to_request_headers(&BTreeMap::new(), "/public", None);
+        let public = engine.apply_to_request_headers(&HeaderMap::new(), "/public", None);
         assert!(!public.contains_key("X-Admin"));
     }
 
@@ -301,10 +416,75 @@ mod tests {
         let engine = MatchReplaceEngine::new(vec![rule]);
         let body = r#"{"user":"admin","password":"secret123","role":"admin"}"#;
 
-        let out = engine.apply_to_body(body, RuleDirection::Response, &BTreeMap::new());
+        let out = engine.apply_to_body(body, RuleDirection::Response, &HeaderMap::new(), "/");
 
         assert!(out.contains(r#""password":"***""#));
         assert!(!out.contains("secret123"));
+    }
+
+    #[test]
+    fn header_condition_is_case_insensitive() {
+        let rule = MatchRule {
+            name: "lowercase_keys".to_owned(),
+            direction: RuleDirection::Request,
+            r#match: MatchCondition {
+                kind: MatchConditionType::Header,
+                header: Some("Content-Type".to_owned()),
+                pattern: Some(r"application/json".to_owned()),
+            },
+            action: ReplaceAction {
+                kind: ReplaceActionType::SetHeader,
+                header: Some("X-JSON".to_owned()),
+                value: Some("true".to_owned()),
+                pattern: None,
+                replacement: None,
+            },
+        };
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let matched = engine.apply_to_request_headers(
+            &headers(&[("content-type", "application/json")]),
+            "/",
+            None,
+        );
+        assert_eq!(value(&matched, "X-JSON"), Some("true"));
+    }
+
+    #[test]
+    fn path_condition_applies_to_body_rules() {
+        let rule = MatchRule {
+            name: "body_on_admin_path".to_owned(),
+            direction: RuleDirection::Request,
+            r#match: MatchCondition {
+                kind: MatchConditionType::PathPattern,
+                header: None,
+                pattern: Some(r"/admin/.*".to_owned()),
+            },
+            action: ReplaceAction {
+                kind: ReplaceActionType::ReplaceBody,
+                header: None,
+                value: None,
+                pattern: Some("secret".to_owned()),
+                replacement: Some("REDACTED".to_owned()),
+            },
+        };
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let rewritten = engine.apply_to_body(
+            "secret=1",
+            RuleDirection::Request,
+            &HeaderMap::new(),
+            "/admin/x",
+        );
+        assert_eq!(rewritten, "REDACTED=1");
+
+        let untouched = engine.apply_to_body(
+            "secret=1",
+            RuleDirection::Request,
+            &HeaderMap::new(),
+            "/public",
+        );
+        assert_eq!(untouched, "secret=1");
     }
 
     #[test]
@@ -319,7 +499,7 @@ mod tests {
         let mut engine = MatchReplaceEngine::new(vec![always_rule(action)]);
         engine.remove_rule("test");
 
-        let out = engine.apply_to_request_headers(&BTreeMap::new(), "/", None);
+        let out = engine.apply_to_request_headers(&HeaderMap::new(), "/", None);
         assert!(!out.contains_key("X-Test"));
     }
 
@@ -339,7 +519,7 @@ mod tests {
         };
         let engine = MatchReplaceEngine::new(vec![rule]);
 
-        let out = engine.apply_to_request_headers(&BTreeMap::new(), "/", None);
+        let out = engine.apply_to_request_headers(&HeaderMap::new(), "/", None);
         assert!(!out.contains_key("X-Resp"));
     }
 }

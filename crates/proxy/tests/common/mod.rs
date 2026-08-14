@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use api_tester_domain::{HttpFlow, ProxyConfig, ScopeConfig};
 use api_tester_ports::{CaptureSink, PortError, SessionRepository};
 use api_tester_proxy::{
-    CertProvider, MatchReplaceEngine, ProxyServer, RcgenCertProvider, ScopeFilter, UpstreamClient,
+    CertProvider, InterceptController, MatchReplaceEngine, ProxyServer, RcgenCertProvider,
+    ScopeFilter, UpstreamClient,
 };
 use api_tester_test_support::InMemorySessionRepository;
 use async_trait::async_trait;
@@ -38,10 +39,39 @@ impl VecCaptureSink {
     }
 }
 
+/// Waits (with a short poll) until the sink has captured `count` flows.
+/// Captured flows are pushed asynchronously after the response streams to the
+/// client, so tests must not assert on the count synchronously.
+pub async fn wait_for_flows(sink: &Arc<VecCaptureSink>, count: usize) -> Vec<HttpFlow> {
+    for _ in 0..100 {
+        let flows = sink.flows();
+        if flows.len() >= count {
+            return flows;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    sink.flows()
+}
+
 pub async fn start_proxy(
     config: ProxyConfig,
     scope_config: ScopeConfig,
     sink: Arc<VecCaptureSink>,
+) -> Arc<ProxyServer> {
+    start_proxy_with_intercept(
+        config,
+        scope_config,
+        sink,
+        Arc::new(InterceptController::default()),
+    )
+    .await
+}
+
+pub async fn start_proxy_with_intercept(
+    config: ProxyConfig,
+    scope_config: ScopeConfig,
+    sink: Arc<VecCaptureSink>,
+    intercept: Arc<InterceptController>,
 ) -> Arc<ProxyServer> {
     let scope = Arc::new(ScopeFilter::new(scope_config).unwrap());
     let match_replace = Arc::new(MatchReplaceEngine::new(vec![]));
@@ -51,15 +81,18 @@ pub async fn start_proxy(
     let upstream = Arc::new(UpstreamClient::new(&config).unwrap());
     let session_repository: Arc<dyn SessionRepository> =
         Arc::new(InMemorySessionRepository::default());
-    let proxy = Arc::new(ProxyServer::new(
-        config,
-        scope,
-        match_replace,
-        cert,
-        upstream,
-        sink,
-        session_repository,
-    ));
+    let proxy = Arc::new(
+        ProxyServer::new(
+            config,
+            scope,
+            match_replace,
+            cert,
+            upstream,
+            sink,
+            session_repository,
+        )
+        .with_intercept(intercept),
+    );
     proxy.clone().start().await.unwrap();
     proxy
 }
@@ -71,8 +104,22 @@ pub struct MockHttpUpstream {
 
 impl MockHttpUpstream {
     pub async fn start() -> Self {
+        Self::start_with_body_size(0).await
+    }
+
+    /// Starts an upstream that returns a body of `extra` bytes (plus the
+    /// `{"received":true}` prefix) on every request. `extra == 0` uses the
+    /// default small body.
+    pub async fn start_with_body_size(extra: usize) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
+        let body = if extra == 0 {
+            br#"{"received":true}"#.to_vec()
+        } else {
+            let mut body = br#"{"received":true}"#.to_vec();
+            body.extend(std::iter::repeat_n(b'x', extra));
+            body
+        };
         let received = Arc::new(Mutex::new(Vec::new()));
         tokio::spawn({
             let received = received.clone();
@@ -82,6 +129,7 @@ impl MockHttpUpstream {
                         break;
                     };
                     let received = received.clone();
+                    let body = body.clone();
                     tokio::spawn(async move {
                         let mut socket = socket;
                         let mut buffer = Vec::new();
@@ -97,11 +145,10 @@ impl MockHttpUpstream {
                                     .push(head);
                                 buffer.drain(..head_end + 4);
 
-                                let body = b"{\"received\":true}";
                                 let response = format!(
                                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                                     body.len(),
-                                    String::from_utf8_lossy(body)
+                                    String::from_utf8_lossy(&body)
                                 );
                                 if socket.write_all(response.as_bytes()).await.is_err() {
                                     return;

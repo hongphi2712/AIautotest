@@ -1,0 +1,13 @@
+{
+  "name": "api-tester-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "predev": "node scripts/cleanup-dev.js",
+    "tauri": "tauri",
+    "dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

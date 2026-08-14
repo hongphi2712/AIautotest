@@ -15,26 +15,21 @@ fn now_utc() -> DateTime<Utc> {
     Utc::now()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HttpMethod {
-    #[serde(rename = "GET")]
     Get,
-    #[serde(rename = "POST")]
     Post,
-    #[serde(rename = "PUT")]
     Put,
-    #[serde(rename = "DELETE")]
     Delete,
-    #[serde(rename = "PATCH")]
     Patch,
-    #[serde(rename = "OPTIONS")]
     Options,
-    #[serde(rename = "HEAD")]
     Head,
+    /// Any method outside the fixed set (custom methods), preserved verbatim.
+    Other(String),
 }
 
 impl HttpMethod {
-    pub const fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
@@ -43,7 +38,36 @@ impl HttpMethod {
             Self::Patch => "PATCH",
             Self::Options => "OPTIONS",
             Self::Head => "HEAD",
+            Self::Other(method) => method,
         }
+    }
+}
+
+impl serde::Serialize for HttpMethod {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for HttpMethod {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let method = String::deserialize(deserializer)?;
+        Ok(match method.as_str() {
+            "GET" => Self::Get,
+            "POST" => Self::Post,
+            "PUT" => Self::Put,
+            "DELETE" => Self::Delete,
+            "PATCH" => Self::Patch,
+            "OPTIONS" => Self::Options,
+            "HEAD" => Self::Head,
+            _ => Self::Other(method),
+        })
     }
 }
 
@@ -113,9 +137,15 @@ impl HttpFlow {
     }
 
     pub fn has_json_body(&self) -> bool {
-        self.request_headers
-            .get("Content-Type")
+        self.request_header_value("Content-Type")
             .is_some_and(|value| value.contains("application/json"))
+    }
+
+    fn request_header_value<'a>(&'a self, name: &str) -> Option<&'a str> {
+        self.request_headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
     }
 
     pub fn json_body(&self) -> Option<Value> {
@@ -206,5 +236,29 @@ mod tests {
         flow.request_body = Some("x".repeat(1_000));
         flow.response_body = Some("y".repeat(2_000));
         assert!(flow.size_bytes() >= 3_000);
+    }
+
+    #[test]
+    fn json_body_detection_is_case_insensitive() {
+        let mut flow = HttpFlow::new(HttpMethod::Post, "example.com", "/login");
+        flow.request_headers
+            .insert("content-type".to_owned(), "application/json".to_owned());
+        flow.request_body = Some("{\"a\":1}".to_owned());
+        assert!(flow.has_json_body());
+        assert!(flow.json_body().is_some());
+    }
+
+    #[test]
+    fn custom_method_round_trips_verbatim() {
+        let method = HttpMethod::Other("PROPFIND".to_owned());
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, "\"PROPFIND\"");
+        assert_eq!(serde_json::from_str::<HttpMethod>(&json).unwrap(), method);
+        assert_eq!(method.as_str(), "PROPFIND");
+
+        assert_eq!(
+            serde_json::from_str::<HttpMethod>("\"GET\"").unwrap(),
+            HttpMethod::Get
+        );
     }
 }

@@ -50,3 +50,28 @@ pub trait ScanExecutor: Send + Sync {
     async fn submit(&self, job: ScanJob) -> Result<String, PortError>;
     async fn cancel(&self, job_id: &str) -> Result<(), PortError>;
 }
+
+/// An outbound HTTP request used by the auth flow and (later) the scanner.
+#[derive(Debug, Clone)]
+pub struct HttpRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
+/// An HTTP response returned by the `HttpClient` port.
+#[derive(Debug, Clone)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+/// Boundary for outbound HTTP execution. Implemented by adapters (reqwest,
+/// hyper) so feature crates like auth and scanner never depend on a concrete
+/// HTTP client and stay testable with in-memory mocks.
+#[async_trait]
+pub trait HttpClient: Send + Sync {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, PortError>;
+}

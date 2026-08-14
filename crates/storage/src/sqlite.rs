@@ -135,6 +135,30 @@ impl FlowRepository for SqliteFlowRepository {
     }
 }
 
+impl SqliteFlowRepository {
+    /// Most recent flows across all sessions, newest first. Used by the
+    /// dashboard to show persisted history after a restart.
+    pub async fn list_recent(&self, limit: u64) -> Result<Vec<HttpFlow>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, session_id, timestamp, method, host, ip, path, full_url,
+                    request_headers, request_body, request_cookies, request_cookie_values,
+                    response_status, response_headers, response_body, response_cookies,
+                    response_cookie_values, content_type
+             FROM flows
+             ORDER BY timestamp DESC
+             LIMIT ?",
+        )
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(port_error)?;
+        rows.iter()
+            .map(flow_from_row)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(port_error)
+    }
+}
+
 const FLOW_UPSERT: &str = "INSERT INTO flows (
              id, session_id, timestamp, method, host, ip, path, full_url,
              request_headers, request_body, request_cookies, request_cookie_values,
@@ -230,6 +254,27 @@ impl SessionRepository for SqliteSessionRepository {
     }
 }
 
+impl SqliteSessionRepository {
+    /// Most recent sessions, newest first. Used by the dashboard to list
+    /// capture sessions.
+    pub async fn list_recent(&self, limit: u64) -> Result<Vec<Session>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, name, target_host, start_time, end_time, flow_count, notes
+             FROM sessions
+             ORDER BY start_time DESC
+             LIMIT ?",
+        )
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(port_error)?;
+        rows.iter()
+            .map(session_from_row)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(port_error)
+    }
+}
+
 const SELECT_FLOW: &str = "SELECT id, session_id, timestamp, method, host, ip, path, full_url,
                     request_headers, request_body, request_cookies, request_cookie_values,
                     response_status, response_headers, response_body, response_cookies,
@@ -289,7 +334,7 @@ fn parse_method(value: &str) -> Result<HttpMethod, sqlx::Error> {
         "PATCH" => Ok(HttpMethod::Patch),
         "OPTIONS" => Ok(HttpMethod::Options),
         "HEAD" => Ok(HttpMethod::Head),
-        other => Err(decode_error(format!("unknown HTTP method: {other}"))),
+        other => Ok(HttpMethod::Other(other.to_owned())),
     }
 }
 
