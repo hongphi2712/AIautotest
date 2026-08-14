@@ -93,7 +93,7 @@ async fn persisted_flows(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
         .runtime
         .spawn(async move {
             if let Some(store) = open_store(store_arc).await {
-                store.flows().list_recent(500).await.unwrap_or_default()
+                store.flows().list_recent(5000).await.unwrap_or_default()
             } else {
                 Vec::new()
             }
@@ -392,7 +392,16 @@ async fn build_proxy(state: &AppState) -> Result<Arc<ProxyServer>, String> {
     let match_replace = Arc::new(MatchReplaceEngine::new(config.match_replace_rules.clone()));
     let cert_dir = config.proxy.ssl_cert_dir.clone().unwrap_or_else(certs_dir);
     std::fs::create_dir_all(&cert_dir).map_err(|error| error.to_string())?;
-    let cert: Arc<dyn CertProvider> = Arc::new(RcgenCertProvider::new(cert_dir));
+    // Host certificates point their CRL distribution point at the proxy's real
+    // listener so strict clients (Windows schannel) can fetch the CRL.
+    // Wildcard listeners are normalized to loopback, which is what the local
+    // client can actually reach.
+    let crl_host = match config.proxy.host.as_str() {
+        "0.0.0.0" | "::" | "" => "127.0.0.1".to_owned(),
+        host => host.to_owned(),
+    };
+    let crl_url = format!("http://{crl_host}:{}/ca.crl", config.proxy.port);
+    let cert: Arc<dyn CertProvider> = Arc::new(RcgenCertProvider::new_with_crl(cert_dir, crl_url));
     // Force CA generation at start so ca.crt exists for installation.
     cert.ca_cert_pem().map_err(|error| error.to_string())?;
     let upstream = Arc::new(UpstreamClient::new(&config.proxy).map_err(|error| error.to_string())?);

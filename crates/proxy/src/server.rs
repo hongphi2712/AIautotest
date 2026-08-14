@@ -45,6 +45,10 @@ const MAX_HEAD_BYTES: usize = 64 * 1024;
 /// would otherwise flood the console and the UI's `last_error`.
 const TUNNEL_ERROR_COOLDOWN: Duration = Duration::from_secs(30);
 const MAX_TUNNEL_ERROR_KEYS: usize = 512;
+/// Cap on the body shipped with each intercepted entry to the UI (polled every
+/// second while intercept is on). Forwarding unchanged still uses the full body
+/// held by the proxy; only an explicit edit round-trips the truncated copy.
+const INTERCEPT_BODY_CAP: usize = 256 * 1024;
 
 /// Throttles repeated diagnostics for identical tunnel failures so ad beacons
 /// to dead hosts (e.g. AdSense tynt.com) only surface once per cooldown.
@@ -121,7 +125,7 @@ struct CapturedBody {
 /// Relays an upstream response body to the client while capturing a capped
 /// copy for the flow. The flow is finalized when the captured body reaches the
 /// declared `Content-Length`, when it is truncated at the cap, or when the
-/// (chunked) stream ends — because hyper stops polling a sized relay body
+/// (chunked) stream ends â€” because hyper stops polling a sized relay body
 /// without awaiting `Ready(None)`.
 struct TeeBody {
     inner: Incoming,
@@ -420,7 +424,8 @@ impl ProxyServer {
         let (host, port) = parse_connect_target(target);
 
         if self.scope.should_capture(&host, "/") {
-            self.mitm(socket, &host, port, shutdown).await;
+            let client_ip = peer_ip(&socket);
+            self.mitm(socket, &host, port, client_ip, shutdown).await;
         } else {
             self.tunnel(socket, &host, port, shutdown).await;
         }
@@ -431,6 +436,7 @@ impl ProxyServer {
         socket: TcpStream,
         host: &str,
         port: u16,
+        client_ip: String,
         shutdown: watch::Receiver<bool>,
     ) {
         let mut socket = socket;
@@ -457,7 +463,6 @@ impl ProxyServer {
                 _ => return,
             };
 
-        let client_ip = String::new();
         let tunnel_host = Some(if port == 443 {
             host.to_owned()
         } else {
@@ -589,8 +594,10 @@ impl ProxyServer {
 
         let capture = self.scope.should_capture(&host, &path);
 
-        let (request_body, request_truncated) =
-            collect_body(req.body_mut(), self.config.max_body_bytes).await?;
+        // Collect the full request body: truncating here would silently corrupt
+        // large uploads forwarded upstream. The captured copy is capped instead
+        // (`capture_request_body` below).
+        let (request_body, _request_truncated) = collect_body(req.body_mut(), usize::MAX).await?;
 
         let mut request_headers = req.headers().clone();
         let request_body_str = String::from_utf8_lossy(&request_body);
@@ -601,7 +608,7 @@ impl ProxyServer {
         );
 
         let mut request_body = request_body;
-        let mut request_modified = request_truncated;
+        let mut request_modified = false;
         if let Ok(request_text) = std::str::from_utf8(&request_body) {
             let rewritten = self.match_replace.apply_to_body(
                 request_text,
@@ -631,7 +638,10 @@ impl ProxyServer {
                 status: None,
                 reason: None,
                 headers: headers_to_intercept(&request_headers),
-                body: String::from_utf8_lossy(&request_body).into_owned(),
+                body: String::from_utf8_lossy(
+                    &request_body[..request_body.len().min(INTERCEPT_BODY_CAP)],
+                )
+                .into_owned(),
                 timestamp: chrono::Utc::now(),
             };
             let rx = self.intercept.enqueue(entry);
@@ -659,6 +669,11 @@ impl ProxyServer {
                 }
             }
         }
+
+        // Capped copy of the (possibly edited) request body for capture, so the
+        // stored flow stays within `max_body_bytes` regardless of upload size.
+        let capture_request_body =
+            request_body[..request_body.len().min(self.config.max_body_bytes)].to_vec();
 
         let upstream_uri = format!("{scheme}://{host}{path}");
         let mut builder = Request::builder().method(method.clone()).uri(&upstream_uri);
@@ -690,7 +705,10 @@ impl ProxyServer {
                 status: Some(response_parts.status.as_u16()),
                 reason: response_parts.status.canonical_reason().map(str::to_owned),
                 headers: headers_to_intercept(&response_headers),
-                body: String::from_utf8_lossy(&full_body).into_owned(),
+                body: String::from_utf8_lossy(
+                    &full_body[..full_body.len().min(INTERCEPT_BODY_CAP)],
+                )
+                .into_owned(),
                 timestamp: chrono::Utc::now(),
             };
             let rx = self.intercept.enqueue(entry);
@@ -728,7 +746,7 @@ impl ProxyServer {
                         scheme: scheme.clone(),
                         path: path.clone(),
                         request_headers: request_headers.clone(),
-                        request_body: request_body.to_vec(),
+                        request_body: capture_request_body.clone(),
                         status: status.as_u16(),
                         response_headers: headers.clone(),
                     },
@@ -757,7 +775,7 @@ impl ProxyServer {
                 scheme: scheme.clone(),
                 path: path.clone(),
                 request_headers: request_headers.clone(),
-                request_body: request_body.to_vec(),
+                request_body: capture_request_body.clone(),
                 status: response_parts.status.as_u16(),
                 response_headers: response_parts.headers.clone(),
             })

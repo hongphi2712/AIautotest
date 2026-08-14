@@ -85,14 +85,27 @@ struct CaMaterial {
 /// restarts, host certs generated once per host and cached.
 pub struct RcgenCertProvider {
     cert_dir: PathBuf,
+    /// Full CRL URL baked into generated host certificates (including the
+    /// proxy's actual listening port), so strict clients can fetch it.
+    crl_url: String,
     ca: Mutex<Option<Arc<CaMaterial>>>,
     host_certs: Mutex<HashMap<String, Arc<HostCert>>>,
 }
 
 impl RcgenCertProvider {
+    /// Uses a default CRL URL of `http://127.0.0.1:8080/ca.crl` (kept for
+    /// tests and back-compat). Prefer [`RcgenCertProvider::new_with_crl`].
     pub fn new(cert_dir: PathBuf) -> Self {
+        Self::new_with_crl(cert_dir, CRL_URL.to_owned())
+    }
+
+    /// Creates a provider that signs host certificates pointing at the given
+    /// CRL URL, which must match where the proxy actually listens so strict
+    /// clients (Windows schannel) can complete revocation checks.
+    pub fn new_with_crl(cert_dir: PathBuf, crl_url: impl Into<String>) -> Self {
         Self {
             cert_dir,
+            crl_url: crl_url.into(),
             ca: Mutex::new(None),
             host_certs: Mutex::new(HashMap::new()),
         }
@@ -174,7 +187,10 @@ impl RcgenCertProvider {
         let cert_path = self.cert_dir.join(format!("{hostname}.crt"));
         let key_path = self.cert_dir.join(format!("{hostname}.key"));
 
-        if cert_path.exists() && key_path.exists() && host_cert_has_crl_dp(&cert_path) {
+        if cert_path.exists()
+            && key_path.exists()
+            && host_cert_matches_crl(&cert_path, &self.crl_url)
+        {
             return HostCert::from_pem_files(&cert_path, &key_path);
         }
 
@@ -188,7 +204,7 @@ impl RcgenCertProvider {
             .push(DnType::CommonName, hostname.to_owned());
         params.subject_alt_names = host_san(hostname)?;
         params.crl_distribution_points = vec![rcgen::CrlDistributionPoint {
-            uris: vec![CRL_URL.to_owned()],
+            uris: vec![self.crl_url.clone()],
         }];
         let cert = params
             .signed_by(&leaf_key, &ca.cert, &ca.key)
@@ -262,10 +278,13 @@ fn cert_error<E: std::fmt::Display>(error: E) -> ProxyError {
     ProxyError::Cert(error.to_string())
 }
 
-/// Whether an on-disk host certificate carries the CRL distribution points
-/// extension. Older generated certs lack it, so strict clients cannot check
-/// revocation; such certs are regenerated with the extension present.
-fn host_cert_has_crl_dp(path: &Path) -> bool {
+/// Whether an on-disk host certificate's CRL distribution points point at the
+/// expected URL. Older generated certs lack the extension or used a different
+/// proxy port, so strict clients cannot check revocation; such certs are
+/// regenerated with the correct distribution point.
+fn host_cert_matches_crl(path: &Path, expected_url: &str) -> bool {
+    use x509_parser::extensions::{DistributionPointName, GeneralName, ParsedExtension};
+
     let Ok(pem) = std::fs::read(path) else {
         return false;
     };
@@ -275,9 +294,27 @@ fn host_cert_has_crl_dp(path: &Path) -> bool {
     let Ok((_, cert)) = x509_parser::parse_x509_certificate(der.as_ref()) else {
         return false;
     };
-    cert.extensions()
-        .iter()
-        .any(|extension| extension.oid.to_string() == "2.5.29.31")
+    for extension in cert.extensions() {
+        if extension.oid.to_string() != "2.5.29.31" {
+            continue;
+        }
+        let ParsedExtension::CRLDistributionPoints(crl_dp) = extension.parsed_extension() else {
+            continue;
+        };
+        for point in crl_dp.iter() {
+            let Some(DistributionPointName::FullName(names)) = &point.distribution_point else {
+                continue;
+            };
+            for name in names {
+                if let GeneralName::URI(uri) = name {
+                    if *uri == expected_url {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Parses a CA private key. rcgen expects PKCS#8, but the Python reference
@@ -412,6 +449,38 @@ mod tests {
             provider.cached_host_count(),
             1,
             "second call reuses the cache"
+        );
+    }
+
+    #[test]
+    fn host_cert_regenerates_when_crl_url_changes() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let first = RcgenCertProvider::new(directory.path().to_path_buf());
+        let _ = first.host_cert("example.com").unwrap();
+        let pem_default = std::fs::read(directory.path().join("example.com.crt")).unwrap();
+
+        let second = RcgenCertProvider::new_with_crl(
+            directory.path().to_path_buf(),
+            "http://127.0.0.1:9090/ca.crl",
+        );
+        let _ = second.host_cert("example.com").unwrap();
+        let pem_9090 = std::fs::read(directory.path().join("example.com.crt")).unwrap();
+
+        assert_ne!(
+            pem_default, pem_9090,
+            "a different CRL URL must regenerate the host cert"
+        );
+
+        let reuse = RcgenCertProvider::new_with_crl(
+            directory.path().to_path_buf(),
+            "http://127.0.0.1:9090/ca.crl",
+        );
+        let _ = reuse.host_cert("example.com").unwrap();
+        let pem_again = std::fs::read(directory.path().join("example.com.crt")).unwrap();
+        assert_eq!(
+            pem_9090, pem_again,
+            "the same CRL URL reuses the on-disk cert"
         );
     }
 

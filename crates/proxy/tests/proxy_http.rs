@@ -179,3 +179,81 @@ async fn large_response_relays_full_but_capture_is_capped() {
         "capture must be capped at max_body_bytes"
     );
 }
+
+#[tokio::test]
+async fn large_request_body_is_forwarded_in_full_but_capture_is_capped() {
+    use tokio::io::AsyncReadExt;
+
+    // Upstream that reads the declared content-length body and echoes the
+    // received byte count back.
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let upstream_port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = socket.read(&mut chunk).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..n]);
+            if let Some(end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buffer[..end]).into_owned();
+                let content_length: usize = head
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse().ok()
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or(0);
+                if buffer.len() >= end + 4 + content_length {
+                    let body_bytes = buffer.len() - (end + 4);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body_bytes.to_string().len(),
+                        body_bytes
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let sink = Arc::new(VecCaptureSink::default());
+    let proxy = start_proxy(
+        ProxyConfig {
+            port: 0,
+            max_body_bytes: 100,
+            ..ProxyConfig::default()
+        },
+        ScopeConfig::default(),
+        sink.clone(),
+    )
+    .await;
+    let proxy_addr = proxy.local_addr().await.unwrap();
+
+    let target = format!("127.0.0.1:{upstream_port}");
+    let body = "x".repeat(500);
+    let response = send_plain_with_body(proxy_addr, &target, "POST", "/api/upload", &body).await;
+
+    assert!(
+        response.contains("\r\n\r\n500"),
+        "upstream must receive all 500 bytes, got: {response}"
+    );
+
+    let flows = wait_for_flows(&sink, 1).await;
+    let flow = &flows[0];
+    assert!(
+        flow.request_body.as_deref().map(str::len).unwrap_or(0) <= 100,
+        "captured request body must be capped at max_body_bytes"
+    );
+}
