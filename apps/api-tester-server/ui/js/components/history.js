@@ -102,6 +102,11 @@ export class HistoryView extends HTMLElement {
     const scroll = this.querySelector('#table-scroll');
     if (!scroll || scroll.offsetParent === null) return;
     const flows = this.sorted(this.filtered());
+    // Skip the rebuild (2s poll) when nothing changed: same row count and the
+    // same first/last rows (sort + filter changes alter at least one of them).
+    const fingerprint = flows.length + ':' + (flows[0]?.id || '') + ':' + (flows[flows.length - 1]?.id || '');
+    if (fingerprint === this._renderFingerprint) return;
+    this._renderFingerprint = fingerprint;
     this.querySelector('#count').textContent = flows.length + ' requests';
     this.tbody.innerHTML = '';
     if (!flows.length) return;

@@ -22,11 +22,18 @@ use crate::state::{AppState, certs_dir, database_path};
 
 #[tauri::command]
 pub async fn app_health(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // Consume `last_error` so the UI banner shows a diagnostic once instead of
+    // sticking permanently (proxy errors are already throttled server-side).
+    let last_error = state
+        .last_error
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .take();
     Ok(json!({
         "status": "ok",
         "proxy_running": state.proxy_running.load(Ordering::SeqCst),
         "flows": all_flows(&state).await.len(),
-        "last_error": state.last_error.lock().unwrap_or_else(|poison| poison.into_inner()).clone(),
+        "last_error": last_error,
     }))
 }
 
