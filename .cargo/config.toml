@@ -1,10 +1,8 @@
-# Optional: make `cargo clean` (target/ GC) cheap by caching compiled crates.
+# Makes `cargo clean` (target/ GC) cheap by caching compiled crates.
 # Cargo never removes hashed artifacts from past builds, so target/ grows with
 # every real recompile; `cargo clean` is the only fully correct GC, and sccache
 # makes the rebuild after it fast.
 #
-# Install once:
-#   cargo install sccache        # or: winget install sccache
-# Then uncomment:
-# [build]
-# rustc-wrapper = "sccache"
+# Install once:  cargo install sccache   # or: winget install sccache
+[build]
+rustc-wrapper = "sccache"
