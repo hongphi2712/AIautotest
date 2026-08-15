@@ -47,11 +47,16 @@ export class InterceptView extends HTMLElement {
       else if (event.detail === 'apply') this.applyInterceptEdit();
       else if (event.detail === 'cancel') this.hideEditPane();
     });
+    this.onWsIntercept = () => {
+      if (this.interceptEnabled) this.refreshIntercept();
+    };
+    window.addEventListener('app:ws-intercept', this.onWsIntercept);
     this.syncInterceptStatus();
   }
 
   disconnectedCallback() {
     this.stopInterceptPolling();
+    window.removeEventListener('app:ws-intercept', this.onWsIntercept);
   }
 
   async syncInterceptStatus() {
@@ -90,16 +95,17 @@ export class InterceptView extends HTMLElement {
 
   startInterceptPolling() {
     this.stopInterceptPolling();
-    const poll = async () => {
-      try {
-        this.interceptEntries = await apiGet('/api/intercept/list');
-      } catch (error) {
-        this.interceptEntries = [];
-      }
-      this.renderIntercepted();
-    };
-    poll();
-    this.timer = setInterval(poll, 1000);
+    this.refreshIntercept();
+    this.timer = setInterval(() => this.refreshIntercept(), 1000);
+  }
+
+  async refreshIntercept() {
+    try {
+      this.interceptEntries = await apiGet('/api/intercept/list');
+    } catch (error) {
+      this.interceptEntries = [];
+    }
+    this.renderIntercepted();
   }
 
   stopInterceptPolling() {

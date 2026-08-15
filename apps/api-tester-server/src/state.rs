@@ -45,6 +45,8 @@ pub struct AppState {
     pub intercept: Arc<InterceptController>,
     /// Most recent proxy request error, surfaced to the UI.
     pub last_error: Arc<std::sync::Mutex<Option<String>>>,
+    /// Real-time event bus pushed over the WebSocket to the browser UI.
+    pub ws_tx: Arc<tokio::sync::broadcast::Sender<String>>,
 }
 
 impl AppState {
@@ -64,6 +66,7 @@ impl AppState {
 
         let http = Arc::new(ReqwestHttpClient::new()?);
         let _ = std::fs::create_dir_all(data_dir());
+        let (ws_tx, _) = tokio::sync::broadcast::channel::<String>(256);
 
         Ok(Self {
             config,
@@ -76,12 +79,20 @@ impl AppState {
             events: Arc::new(EventBus::new(256)),
             intercept: Arc::new(InterceptController::default()),
             last_error: Arc::new(std::sync::Mutex::new(None)),
+            ws_tx: Arc::new(ws_tx),
         })
     }
 
     /// Opens the SQLite store once, lazily.
     pub async fn store(&self) -> Option<SqliteStore> {
         open_store(&self.store).await
+    }
+
+    /// Broadcasts a JSON message to every WebSocket client (the browser UI).
+    pub fn ws_send(&self, message: &serde_json::Value) {
+        if let Ok(text) = serde_json::to_string(message) {
+            let _ = self.ws_tx.send(text);
+        }
     }
 }
 

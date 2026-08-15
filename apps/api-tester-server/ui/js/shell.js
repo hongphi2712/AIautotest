@@ -67,6 +67,19 @@ export function initShell() {
   window.addEventListener('app:error', (event) => showBanner(event.detail));
   window.addEventListener('app:navigate', (event) => showView(event.detail.view));
   window.addEventListener('app:refresh-proxy', () => refreshProxyStatus());
+  window.addEventListener('app:ws-proxy', (event) => {
+    const running = event.detail && event.detail.running;
+    const address = (event.detail && event.detail.address) || '';
+    const pill = document.getElementById('proxy-pill');
+    if (pill) pill.classList.toggle('running', running);
+    const pillText = document.getElementById('proxy-pill-text');
+    if (pillText) pillText.textContent = running ? 'Proxy: ' + address : 'Proxy: stopped';
+    const sbProxy = document.getElementById('sb-proxy');
+    if (sbProxy) {
+      sbProxy.textContent = running ? 'Proxy: ' + address : 'Proxy: stopped';
+      sbProxy.className = running ? 'ok' : 'warn';
+    }
+  });
 
   refreshProxyStatus();
   refreshHealth();

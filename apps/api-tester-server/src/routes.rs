@@ -11,6 +11,7 @@ use tower_http::services::ServeDir;
 
 use crate::serialization::{FlowFilters, FlowSummary, RepeaterRequest};
 use crate::state::AppState;
+use crate::ws;
 
 pub type SharedState = Arc<AppState>;
 
@@ -37,6 +38,7 @@ pub fn router(state: SharedState, ui_dir: String) -> Router {
         .route("/api/intercept/{id}/forward", post(intercept_forward))
         .route("/api/intercept/{id}/drop", post(intercept_drop))
         .route("/api/intercept/clear", post(intercept_clear))
+        .route("/ws", get(ws::ws_handler))
         .fallback_service(ServeDir::new(ui_dir))
         .with_state(state)
 }

@@ -4,6 +4,7 @@ mod http_client;
 mod routes;
 mod serialization;
 mod state;
+mod ws;
 
 use std::sync::Arc;
 

@@ -59,6 +59,14 @@ export class HistoryView extends HTMLElement {
     window.addEventListener('app:subtab', (event) => {
       if (event.detail === 'http-history') this.loadFlows();
     });
+    this.onWsFlow = (event) => {
+      const flow = event.detail && event.detail.flow;
+      if (!flow) return;
+      if (this.currentFlows.some((f) => f.id === flow.id)) return;
+      this.currentFlows.unshift(flow);
+      this.render();
+    };
+    window.addEventListener('app:ws-flow', this.onWsFlow);
 
     this.loadFlows();
     this.timer = setInterval(() => this.loadFlows(), 2000);
@@ -66,6 +74,7 @@ export class HistoryView extends HTMLElement {
 
   disconnectedCallback() {
     if (this.timer) clearInterval(this.timer);
+    window.removeEventListener('app:ws-flow', this.onWsFlow);
   }
 
   async loadFlows() {

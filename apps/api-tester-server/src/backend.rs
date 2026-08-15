@@ -103,6 +103,9 @@ impl AppState {
 
     pub async fn start_proxy(&self) -> Result<ProxyStatus, String> {
         ensure_proxy_running(self).await?;
+        self.ws_send(
+            &json!({"type": "proxy", "running": true, "address": self.proxy_status().address}),
+        );
         Ok(self.proxy_status())
     }
 
@@ -115,6 +118,9 @@ impl AppState {
                 .map_err(|error| error.to_string())?;
         }
         self.proxy_running.store(false, Ordering::SeqCst);
+        self.ws_send(
+            &json!({"type": "proxy", "running": false, "address": self.proxy_status().address}),
+        );
         Ok(self.proxy_status())
     }
 
@@ -213,6 +219,7 @@ impl AppState {
 
     pub fn intercept_set_enabled(&self, enabled: bool) -> Result<(), String> {
         self.intercept.set_enabled(enabled);
+        self.ws_send(&json!({"type": "intercept", "held": self.intercept.len()}));
         Ok(())
     }
 
@@ -223,6 +230,7 @@ impl AppState {
     ) -> Result<(), String> {
         self.intercept.set_intercept_requests(intercept_requests);
         self.intercept.set_intercept_responses(intercept_responses);
+        self.ws_send(&json!({"type": "intercept", "held": self.intercept.len()}));
         Ok(())
     }
 
@@ -244,15 +252,20 @@ impl AppState {
     }
 
     pub fn intercept_forward(&self, id: &str, edit: Option<InterceptEdit>) -> Result<bool, String> {
-        Ok(self.intercept.forward(id, edit))
+        let ok = self.intercept.forward(id, edit);
+        self.ws_send(&json!({"type": "intercept", "held": self.intercept.len()}));
+        Ok(ok)
     }
 
     pub fn intercept_drop(&self, id: &str) -> Result<bool, String> {
-        Ok(self.intercept.drop_item(id))
+        let ok = self.intercept.drop_item(id);
+        self.ws_send(&json!({"type": "intercept", "held": self.intercept.len()}));
+        Ok(ok)
     }
 
     pub fn intercept_clear(&self) -> Result<(), String> {
         self.intercept.clear_all();
+        self.ws_send(&json!({"type": "intercept", "held": self.intercept.len()}));
         Ok(())
     }
 }
@@ -461,6 +474,7 @@ async fn build_proxy(state: &AppState) -> Result<Arc<ProxyServer>, String> {
         state.buffer.clone(),
         state.store.clone(),
         state.events.clone(),
+        state.ws_tx.clone(),
     ));
     let session_repository: Arc<dyn SessionRepository> = Arc::new(store.sessions().clone());
 

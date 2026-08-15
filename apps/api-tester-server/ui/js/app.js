@@ -7,5 +7,7 @@ import './components/sidebar.js';
 import './components/repeater.js';
 import './components/proxy-settings.js';
 import { initShell } from './shell.js';
+import { connectWs } from './ws.js';
 
 initShell();
+connectWs();
