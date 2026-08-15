@@ -1,5 +1,5 @@
 import {
-  invoke, toHex, escapeHtml, showError, formatHeaders, parseHttpRequest, parseQueryParams,
+  apiPost, toHex, escapeHtml, showError, formatHeaders, parseHttpRequest, parseQueryParams,
   parseBodyParams, parseCookies, renderHttpWire, contentTypeFromHeaders, httpStartLine,
 } from '../api.js';
 import './inspector-panel.js';
@@ -406,13 +406,11 @@ export class RepeaterView extends HTMLElement {
     }
     status.textContent = 'Sending...';
     try {
-      const result = await invoke('repeater_send', {
-        request: {
-          method: parsed.method,
-          url,
-          headers,
-          body: parsed.body,
-        },
+      const result = await apiPost('/api/repeater/send', {
+        method: parsed.method,
+        url,
+        headers,
+        body: parsed.body,
       });
       tab.response = {
         status: result.status,
@@ -439,7 +437,7 @@ export class RepeaterView extends HTMLElement {
     const hex = this.querySelector('#resp-hex');
     const frame = this.querySelector('#resp-render');
     if (!response) {
-      const placeholder = 'No response — send the request first.';
+      const placeholder = 'No response â€” send the request first.';
       pretty.innerHTML = escapeHtml(placeholder);
       raw.textContent = placeholder;
       hex.textContent = '';

@@ -1,4 +1,29 @@
-export const invoke = window.__TAURI__.core.invoke;
+// REST API client: the UI is served by the axum backend on the same origin,
+// so commands are plain fetch() calls (no Tauri IPC anymore).
+async function request(path, options) {
+  const response = await fetch(path, options);
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const data = await response.json();
+      if (data && data.error) detail = data.error;
+    } catch { /* not JSON */ }
+    throw new Error(detail || response.statusText);
+  }
+  return response.json();
+}
+
+export function apiGet(path) {
+  return request(path);
+}
+
+export function apiPost(path, body) {
+  return request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+}
 
 export function formatStatus(code) { return code === 0 ? 'N/A' : String(code); }
 
@@ -86,7 +111,7 @@ export function showError(message) {
 }
 
 export async function openBrowser() {
-  await invoke('open_browser');
+  await apiPost('/api/browser/open');
 }
 
 const INLINE_TAGS = new Set(['span', 'a', 'b', 'i', 'em', 'strong', 'small', 'code', 'img', 'br', 'input', 'label', 'option', 'select', 'textarea', 'button', 'meta', 'link', 'script', 'style', 'wbr']);

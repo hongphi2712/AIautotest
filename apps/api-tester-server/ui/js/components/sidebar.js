@@ -1,4 +1,4 @@
-import { invoke, escapeHtml, showError } from '../api.js';
+import { apiPost, escapeHtml, showError } from '../api.js';
 import {
   getTasks, getSelected, getLive, createTask, setTaskStatus, removeTask, selectTask, subscribe,
 } from '../store.js';
@@ -17,7 +17,7 @@ export class TaskSidebar extends HTMLElement {
     this.querySelector('#new-live').addEventListener('click', async () => {
       createTask('live');
       try {
-        await invoke('start_proxy');
+        await apiPost('/api/proxy/start');
       } catch (error) {
         showError('Proxy error: ' + error);
       }
@@ -41,7 +41,7 @@ export class TaskSidebar extends HTMLElement {
       item.className = 'task-item' + (selected && selected.id === task.id ? ' selected' : '');
       item.innerHTML = `
         <div class="t-name"><span class="t-status ${task.status}"></span><span>${escapeHtml(task.name)}</span></div>
-        <div class="t-meta">${task.status} · ${task.requests} req · ${task.findings} findings</div>
+        <div class="t-meta">${task.status} Â· ${task.requests} req Â· ${task.findings} findings</div>
         <div class="t-actions"></div>`;
       item.onclick = () => selectTask(task.id);
       const actions = item.querySelector('.t-actions');
@@ -51,7 +51,7 @@ export class TaskSidebar extends HTMLElement {
         actions.appendChild(this.actionButton('Stop', () => {
           setTaskStatus(task.id, 'stopped');
           if (task.id === getLive()?.id) {
-            invoke('stop_proxy').then(() => window.dispatchEvent(new CustomEvent('app:refresh-proxy')));
+            apiPost('/api/proxy/stop').then(() => window.dispatchEvent(new CustomEvent('app:refresh-proxy')));
           }
         }));
       }

@@ -1,4 +1,4 @@
-import { invoke, showError } from './api.js';
+import { apiGet, showError } from './api.js';
 import { setProxyStatus, setLiveFlowCount } from './store.js';
 
 function showView(name) {
@@ -17,7 +17,7 @@ function showBanner(message) {
 
 async function refreshHealth() {
   try {
-    const health = await invoke('app_health');
+    const health = await apiGet('/api/health');
     const flows = health.flows || 0;
     const sbFlows = document.getElementById('sb-flows');
     if (sbFlows) sbFlows.textContent = flows + ' captured';
@@ -33,7 +33,7 @@ async function refreshHealth() {
 
 async function refreshProxyStatus() {
   try {
-    const status = await invoke('proxy_status');
+    const status = await apiGet('/api/proxy/status');
     setProxyStatus(status.running, status.address || '');
     const pill = document.getElementById('proxy-pill');
     if (pill) pill.classList.toggle('running', status.running);

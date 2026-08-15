@@ -1,4 +1,4 @@
-import { invoke, showError, openBrowser } from '../api.js';
+import { apiGet, apiPost, showError, openBrowser } from '../api.js';
 import { getProxy, subscribe } from '../store.js';
 
 const TEMPLATE = `
@@ -18,9 +18,9 @@ const TEMPLATE = `
   <div class="panel"><h3>Scope</h3><p class="muted">Scope include/exclude rules are loaded from configuration. Out-of-scope traffic is forwarded as a blind tunnel and never captured.</p></div>
   <div class="panel">
     <h3>Certificates</h3>
-    <p class="muted">CA: <code id="ca-path">checking…</code></p>
+    <p class="muted">CA: <code id="ca-path">checkingâ€¦</code></p>
     <div class="row" style="margin-top:8px">
-      <span id="ca-status" class="muted">Checking…</span>
+      <span id="ca-status" class="muted">Checkingâ€¦</span>
       <button id="ca-install" class="btn" disabled>Install CA</button>
     </div>
     <p class="muted" style="margin-top:8px">HTTPS interception signs per-host certificates with this CA. Install it into your trust store so the browser accepts the MITM certificates.</p>
@@ -54,11 +54,11 @@ export class ProxySettingsView extends HTMLElement {
     const button = this.querySelector('#px-toggle');
     button.disabled = true;
     try {
-      const status = await invoke('proxy_status');
+      const status = await apiGet('/api/proxy/status');
       if (status.running) {
-        await invoke('stop_proxy');
+        await apiPost('/api/proxy/stop');
       } else {
-        await invoke('start_proxy');
+        await apiPost('/api/proxy/start');
       }
       window.dispatchEvent(new CustomEvent('app:refresh-proxy'));
       await this.refreshCertInfo();
@@ -71,12 +71,12 @@ export class ProxySettingsView extends HTMLElement {
 
   async refreshCertInfo() {
     try {
-      const info = await invoke('cert_info');
+      const info = await apiGet('/api/cert/info');
       this.querySelector('#ca-path').textContent = info.path;
       const status = this.querySelector('#ca-status');
       const button = this.querySelector('#ca-install');
       if (!info.exists) {
-        status.textContent = 'Not generated yet — start the proxy first.';
+        status.textContent = 'Not generated yet â€” start the proxy first.';
         button.disabled = true;
         button.textContent = 'Install CA';
       } else if (info.installed) {
@@ -95,7 +95,7 @@ export class ProxySettingsView extends HTMLElement {
 
   async installCa() {
     try {
-      await invoke('install_ca');
+      await apiPost('/api/cert/install');
       await this.refreshCertInfo();
     } catch (error) {
       showError('Install CA failed: ' + error);

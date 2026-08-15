@@ -6,9 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
-[build-dependencies]
-tauri-build = { workspace = true }
-
 [dependencies]
 api-tester-capture.workspace = true
 api-tester-config.workspace = true
@@ -18,14 +15,16 @@ api-tester-ports.workspace = true
 api-tester-proxy.workspace = true
 api-tester-storage.workspace = true
 async-trait.workspace = true
+axum.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
+open.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tauri = { workspace = true }
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-open.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
 
 [dev-dependencies]
 api-tester-test-support.workspace = true

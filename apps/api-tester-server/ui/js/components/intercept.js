@@ -1,5 +1,5 @@
 import {
-  invoke, formatTime, colorStatus, toHex, formatHeaders, showError, openBrowser,
+  apiGet, apiPost, formatTime, colorStatus, toHex, formatHeaders, showError, openBrowser,
   buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson,
   parseQueryParams, parseBodyParams, parseCookies,
 } from '../api.js';
@@ -56,11 +56,11 @@ export class InterceptView extends HTMLElement {
 
   async syncInterceptStatus() {
     try {
-      const status = await invoke('intercept_status');
+      const status = await apiGet('/api/intercept/status');
       this.interceptEnabled = !!status.enabled;
       this.updateInterceptBar();
       if (this.interceptEnabled) {
-        await invoke('intercept_set_scopes', { interceptRequests: true, interceptResponses: true });
+        await apiPost('/api/intercept/scopes', { intercept_requests: true, intercept_responses: true });
         this.startInterceptPolling();
       }
     } catch (error) {
@@ -71,14 +71,14 @@ export class InterceptView extends HTMLElement {
   async toggleIntercept() {
     this.interceptEnabled = !this.interceptEnabled;
     try {
-      await invoke('intercept_set_enabled', { enabled: this.interceptEnabled });
+      await apiPost('/api/intercept/enabled', { enabled: this.interceptEnabled });
     } catch (error) {
       showError('Intercept: ' + error);
       this.interceptEnabled = !this.interceptEnabled;
     }
     this.updateInterceptBar();
     if (this.interceptEnabled) {
-      await invoke('intercept_set_scopes', { interceptRequests: true, interceptResponses: true });
+      await apiPost('/api/intercept/scopes', { intercept_requests: true, intercept_responses: true });
       this.startInterceptPolling();
     } else {
       this.stopInterceptPolling();
@@ -92,7 +92,7 @@ export class InterceptView extends HTMLElement {
     this.stopInterceptPolling();
     const poll = async () => {
       try {
-        this.interceptEntries = await invoke('intercept_list');
+        this.interceptEntries = await apiGet('/api/intercept/list');
       } catch (error) {
         this.interceptEntries = [];
       }
@@ -129,7 +129,7 @@ export class InterceptView extends HTMLElement {
     const entry = this.selectedInterceptEntry();
     if (!entry) return;
     try {
-      await invoke('intercept_forward', { id: entry.id, edit: null });
+      await apiPost('/api/intercept/' + entry.id + '/forward', { edit: null });
     } catch (error) {
       showError('Forward: ' + error);
       return;
@@ -143,7 +143,7 @@ export class InterceptView extends HTMLElement {
     const entry = this.selectedInterceptEntry();
     if (!entry) return;
     try {
-      await invoke('intercept_drop', { id: entry.id });
+      await apiPost('/api/intercept/' + entry.id + '/drop');
     } catch (error) {
       showError('Drop: ' + error);
       return;
@@ -183,7 +183,7 @@ export class InterceptView extends HTMLElement {
       body: q('edit-body').value,
     };
     try {
-      await invoke('intercept_forward', { id: entry.id, edit });
+      await apiPost('/api/intercept/' + entry.id + '/forward', { edit });
     } catch (error) {
       showError('Apply edits: ' + error);
       return;
@@ -221,7 +221,7 @@ export class InterceptView extends HTMLElement {
     this.selectedInterceptId = id;
     let f;
     try {
-      f = await invoke('intercept_detail', { id });
+      f = await apiGet('/api/intercept/' + encodeURIComponent(id));
     } catch (error) {
       showError('Intercept detail: ' + error);
       return;

@@ -1,5 +1,5 @@
 import {
-  invoke, formatStatus, colorStatus, formatTime, shortCookies, shortUrl, toHex,
+  apiGet, formatStatus, colorStatus, formatTime, shortCookies, shortUrl, toHex,
   formatHeaders, showError, buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson,
   parseQueryParams, parseBodyParams,
 } from '../api.js';
@@ -71,7 +71,7 @@ export class HistoryView extends HTMLElement {
   async loadFlows() {
     if (this.offsetParent === null) return;
     try {
-      this.currentFlows = await invoke('list_flows', { filters: { method: '', host: '', q: '' } });
+      this.currentFlows = await apiGet('/api/flows');
       this.render();
     } catch (error) {
       showError('Dashboard API unavailable: ' + error);
@@ -137,7 +137,7 @@ export class HistoryView extends HTMLElement {
 
   async showDetail(id) {
     try {
-      const f = await invoke('flow_detail', { flowId: id });
+      const f = await apiGet('/api/flows/' + encodeURIComponent(id));
       if (!f) return;
       this.selectedFlow = f;
       this.querySelector('#detail-title').textContent = f.method + ' ' + f.full_url + '  |  HTTP ' + formatStatus(f.status) + '  |  ' + f.length + ' chars';
