@@ -217,7 +217,7 @@ export function parseHttpRequest(text) {
   const requestLine = (lines[start] || '').trim();
   const parts = requestLine.split(/\s+/);
   const method = parts[0] || 'GET';
-  const path = parts[1] || '/';
+  let path = parts[1] || '/';
   const version = parts[2] || 'HTTP/1.1';
 
   const headers = [];
@@ -231,7 +231,16 @@ export function parseHttpRequest(text) {
   }
   const body = lines.slice(j + 1).join('\n');
   const host = headers.find((h) => h.name.toLowerCase() === 'host')?.value || 'example.com';
-  const url = `http://${host}${path}`;
+  let url = `http://${host}${path}`;
+  // Absolute-form request target (`GET http://example.com/...`) already
+  // contains the full URL; do not double-prepend the Host.
+  if (/^https?:\/\//i.test(path)) {
+    url = path;
+    try {
+      const parsedUrl = new URL(path);
+      path = parsedUrl.pathname + parsedUrl.search;
+    } catch { /* keep original path */ }
+  }
   return { method, path, version, headers, body, url };
 }
 

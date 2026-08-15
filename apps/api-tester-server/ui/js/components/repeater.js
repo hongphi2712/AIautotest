@@ -61,7 +61,7 @@ const TEMPLATE = `
     <div class="rep-tabs" id="tabs"></div>
     <button class="add-tab" id="add-tab" title="New tab">+</button>
     <div class="tab-tools">
-      <input id="target" class="target" readonly placeholder="Target">
+      <input id="target" class="target" placeholder="Target">
       <button class="btn primary" id="send">Send</button>
     </div>
   </div>
@@ -116,12 +116,16 @@ export class RepeaterView extends HTMLElement {
     this.editorMode = 'pretty';
     this.respMode = 'pretty';
     this.tabSeq = 0;
+    this.targetEdited = false;
 
     this.reqEditor = this.querySelector('#req-editor');
     this.reqEditor.addEventListener('input', () => this.onEditorInput());
     this.reqEditor.addEventListener('scroll', () => {
       this.querySelector('#req-lines').scrollTop = this.reqEditor.scrollTop;
     });
+    const target = this.querySelector('#target');
+    target.addEventListener('input', () => { this.targetEdited = true; });
+    target.addEventListener('focus', () => { this.targetEdited = true; });
     this.querySelector('#add-tab').addEventListener('click', () => this.newTab(''));
     this.querySelector('#send').addEventListener('click', () => this.send());
     this.querySelector('#search').addEventListener('input', (e) => this.applySearch(e.target.value));
@@ -171,11 +175,22 @@ export class RepeaterView extends HTMLElement {
     const tab = this.currentTab();
     this.renderTabs();
     this.reqEditor.textContent = tab.requestText;
-    this.renderEditor();
-    this.updateLineNumbers();
+    this.refreshEditor();
     this.renderResponse(tab.response);
     this.updateTarget();
     this.updateInspector();
+  }
+
+  /// Re-applies the current request view (highlighted editor, plain editor,
+  /// or hex) to the freshly loaded tab content.
+  refreshEditor() {
+    if (this.editorMode === 'hex') {
+      const parsed = parseHttpRequest(this.reqEditor.textContent);
+      this.querySelector('#req-hex').textContent = toHex(parsed.body);
+    } else {
+      this.renderEditor();
+      this.updateLineNumbers();
+    }
   }
 
   closeTab(id) {
@@ -231,7 +246,12 @@ export class RepeaterView extends HTMLElement {
     setCaret(this.reqEditor, caret);
     this.updateLineNumbers();
     this.updateTarget();
-    this.updateInspector();
+    this.scheduleInspectorUpdate();
+  }
+
+  scheduleInspectorUpdate() {
+    clearTimeout(this._inspectorTimer);
+    this._inspectorTimer = setTimeout(() => this.updateInspector(), 250);
   }
 
   setReqTab(mode) {
@@ -271,6 +291,7 @@ export class RepeaterView extends HTMLElement {
   }
 
   updateTarget() {
+    if (this.targetEdited) return;
     const parsed = parseHttpRequest(this.reqEditor.textContent);
     this.querySelector('#target').value = parsed.url;
   }
@@ -371,6 +392,12 @@ export class RepeaterView extends HTMLElement {
     tab.requestText = this.reqEditor.textContent;
     const status = this.querySelector('#status');
     const parsed = parseHttpRequest(tab.requestText);
+    // An explicitly edited Target overrides the URL derived from the request.
+    let url = parsed.url;
+    if (this.targetEdited) {
+      const override = this.querySelector('#target').value.trim();
+      if (override) url = override;
+    }
     const headers = {};
     for (const header of parsed.headers) {
       const lower = header.name.toLowerCase();
@@ -382,7 +409,7 @@ export class RepeaterView extends HTMLElement {
       const result = await invoke('repeater_send', {
         request: {
           method: parsed.method,
-          url: parsed.url,
+          url,
           headers,
           body: parsed.body,
         },
