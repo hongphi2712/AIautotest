@@ -48,7 +48,9 @@ impl From<&HttpFlow> for FlowSummary {
             full_url: flow.full_url.clone(),
             status: flow.response_status,
             content_type: flow.content_type.clone(),
-            length: flow.response_body.as_deref().map(str::len).unwrap_or(0),
+            length: flow
+                .response_body_len
+                .max(flow.response_body.as_deref().map_or(0, str::len)),
             has_params: flow.path.contains('?') || flow.request_body.is_some(),
         }
     }

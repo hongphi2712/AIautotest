@@ -49,10 +49,11 @@ impl FlowBuilder {
         let response_header_vec = headers_to_vec(parts.response_headers);
 
         let encoding = content_encoding(&response_header_vec);
-        let response_body = parts
+        let decoded_body = parts
             .response_body
-            .map(|body| decode_body(body, &encoding, self.max_body_bytes))
-            .map(decoded_to_string);
+            .map(|body| decode_body(body, &encoding, self.max_body_bytes));
+        let response_body = decoded_body.as_deref().map(decoded_to_string);
+        let response_body_len = decoded_body.map_or(0, |body| body.len());
         let request_body = parts
             .request_body
             .map(|body| String::from_utf8_lossy(body).into_owned());
@@ -79,6 +80,7 @@ impl FlowBuilder {
             response_status: parts.status,
             response_headers: headers_to_map(&response_header_vec),
             response_body,
+            response_body_len,
             response_cookies: cookie_names(&response_header_vec, true),
             response_cookie_values: cookie_values(&response_header_vec, true),
             content_type,
@@ -94,8 +96,8 @@ fn default_flow_id() -> String {
 
 /// Converts a decoded body into a `String`, reusing the buffer allocation
 /// when the bytes are valid UTF-8 (avoids one full-body copy per response).
-fn decoded_to_string(decoded: Vec<u8>) -> String {
-    match String::from_utf8(decoded) {
+fn decoded_to_string(decoded: &[u8]) -> String {
+    match String::from_utf8(decoded.to_vec()) {
         Ok(text) => text,
         Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
     }

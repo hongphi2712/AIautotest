@@ -49,7 +49,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: AppConfig) -> Result<Self, String> {
+        // Fixed-size worker pool (not num_cpus) keeps threads/overhead down.
+        // 4 workers handle the async proxy + SQLite + repeater today and leave
+        // headroom for the planned Intruder engine; raise if scans need more.
         let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;
@@ -63,7 +67,7 @@ impl AppState {
 
         Ok(Self {
             config,
-            buffer: Arc::new(RingBuffer::new(10_000)),
+            buffer: Arc::new(RingBuffer::new(5_000)),
             store: Arc::new(tokio::sync::Mutex::new(None)),
             runtime: handle,
             http,

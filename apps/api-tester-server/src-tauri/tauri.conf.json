@@ -15,7 +15,7 @@
         "width": 1280,
         "height": 800,
         "resizable": true,
-        "additionalBrowserArgs": "--disable-component-update --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,OptimizationHints,OptimizationGuideModelDownloading --disable-logging"
+        "additionalBrowserArgs": "--disable-component-update --in-process-gpu --disable-crash-reporter --disable-extensions --disable-background-networking --disable-sync --disable-domain-reliability --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,OptimizationHints,OptimizationGuideModelDownloading,msEdgeFluentOverlayScrollbar --disable-logging"
       }
     ],
     "security": {

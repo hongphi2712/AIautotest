@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use api_tester_domain::Session;
-use api_tester_ports::{HttpClient, HttpRequest, SessionRepository};
+use api_tester_ports::{FlowRepository, HttpClient, HttpRequest, SessionRepository};
 use api_tester_proxy::{
     CertProvider, InterceptEdit, InterceptEntry, MatchReplaceEngine, ProxyServer,
     RcgenCertProvider, ScopeFilter, UpstreamClient,
@@ -58,12 +58,10 @@ pub async fn flow_detail(
     state: State<'_, AppState>,
     flow_id: String,
 ) -> Result<FlowDetail, String> {
-    let flows = all_flows(&state).await;
-    let flow = flows
-        .iter()
-        .find(|flow| flow.id == flow_id)
+    let flow = flow_by_id(&state, &flow_id)
+        .await
         .ok_or_else(|| format!("flow {flow_id} not found"))?;
-    Ok(FlowDetail::from(flow))
+    Ok(FlowDetail::from(&flow))
 }
 
 #[tauri::command]
@@ -82,11 +80,12 @@ pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionSumm
         .collect())
 }
 
-/// Merges persisted SQLite history with the live in-memory buffer (buffer wins
-/// by id), newest first. Keeps the dashboard count and history consistent.
+/// Merges persisted SQLite history (summary rows only) with the live in-memory
+/// buffer (also summary-only), newest first. Never ships request/response
+/// bodies over the 2s poll; `flow_detail` loads the full flow on demand.
 async fn all_flows(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
     let buffer = state.buffer.snapshot();
-    let mut merged = persisted_flows(state).await;
+    let mut merged = persisted_flow_meta(state).await;
     for flow in buffer {
         if let Some(existing) = merged.iter_mut().find(|item| item.id == flow.id) {
             *existing = flow;
@@ -98,19 +97,50 @@ async fn all_flows(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
     merged
 }
 
-async fn persisted_flows(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
+/// Summary-only persisted rows (bodies are not read from SQLite).
+async fn persisted_flow_meta(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
     let store_arc = state.store.clone();
     state
         .runtime
         .spawn(async move {
             if let Some(store) = open_store(&store_arc).await {
-                store.flows().list_recent(5000).await.unwrap_or_default()
+                store
+                    .flows()
+                    .list_recent_meta(5000)
+                    .await
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             }
         })
         .await
         .unwrap_or_default()
+}
+
+/// Full flow for the inspector: loaded from SQLite (bodies included) on demand,
+/// falling back to the in-memory summary buffer if not yet persisted.
+async fn flow_by_id(state: &AppState, flow_id: &str) -> Option<api_tester_domain::HttpFlow> {
+    let store_arc = state.store.clone();
+    let id = flow_id.to_owned();
+    let persisted = state
+        .runtime
+        .spawn(async move {
+            if let Some(store) = open_store(&store_arc).await {
+                store.flows().get_by_id(&id).await.ok().flatten()
+            } else {
+                None
+            }
+        })
+        .await
+        .ok()
+        .flatten();
+    persisted.or_else(|| {
+        state
+            .buffer
+            .snapshot()
+            .into_iter()
+            .find(|f| f.id == flow_id)
+    })
 }
 
 /// Total persisted flow count (used by the dashboard health poll).

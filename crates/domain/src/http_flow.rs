@@ -102,6 +102,10 @@ pub struct HttpFlow {
     pub response_headers: HeaderMap,
     #[serde(default)]
     pub response_body: Option<String>,
+    /// Length of the (decoded, capped) response body, kept on summary-only rows
+    /// so the history table shows sizes without shipping full bodies over IPC.
+    #[serde(default)]
+    pub response_body_len: usize,
     #[serde(default)]
     pub response_cookies: Vec<String>,
     #[serde(default)]
@@ -209,6 +213,7 @@ impl Default for HttpFlow {
             response_status: 0,
             response_headers: HeaderMap::new(),
             response_body: None,
+            response_body_len: 0,
             response_cookies: Vec::new(),
             response_cookie_values: BTreeMap::new(),
             content_type: String::new(),

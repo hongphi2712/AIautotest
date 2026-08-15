@@ -166,6 +166,29 @@ impl SqliteFlowRepository {
             .collect::<Result<Vec<_>, _>>()
             .map_err(port_error)
     }
+
+    /// Summary-only rows (no request/response bodies or headers) for the
+    /// dashboard table, so the 2s poll never reads body blobs. `response_body_len`
+    /// is computed in SQL via `LENGTH()`.
+    pub async fn list_recent_meta(&self, limit: u64) -> Result<Vec<HttpFlow>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, session_id, timestamp, method, host, ip, path, full_url,
+                    request_cookies, request_cookie_values, response_status,
+                    response_cookies, response_cookie_values, content_type,
+                    COALESCE(LENGTH(response_body), 0) AS response_body_len
+             FROM flows
+             ORDER BY timestamp DESC
+             LIMIT ?",
+        )
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(port_error)?;
+        rows.iter()
+            .map(flow_meta_from_row)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(port_error)
+    }
 }
 
 const FLOW_UPSERT: &str = "INSERT INTO flows (
@@ -293,6 +316,7 @@ const SELECT_FLOW: &str = "SELECT id, session_id, timestamp, method, host, ip, p
 
 fn flow_from_row(row: &SqliteRow) -> Result<HttpFlow, sqlx::Error> {
     let timestamp = parse_timestamp(&row.try_get::<String, _>("timestamp")?)?;
+    let response_body: Option<String> = row.try_get("response_body")?;
     Ok(HttpFlow {
         id: row.try_get("id")?,
         session_id: row.try_get("session_id")?,
@@ -308,7 +332,36 @@ fn flow_from_row(row: &SqliteRow) -> Result<HttpFlow, sqlx::Error> {
         request_cookie_values: decode_map(&row.try_get::<String, _>("request_cookie_values")?)?,
         response_status: u16::try_from(row.try_get::<i64, _>("response_status")?).unwrap_or(0),
         response_headers: decode_map(&row.try_get::<String, _>("response_headers")?)?,
-        response_body: row.try_get("response_body")?,
+        response_body: response_body.clone(),
+        response_body_len: response_body.as_deref().map_or(0, str::len),
+        response_cookies: decode_vec(&row.try_get::<String, _>("response_cookies")?)?,
+        response_cookie_values: decode_map(&row.try_get::<String, _>("response_cookie_values")?)?,
+        content_type: row.try_get("content_type")?,
+    })
+}
+
+/// Builds a summary-only flow (no bodies/headers) from a meta row. The
+/// `response_body_len` column is `LENGTH(response_body)` computed in SQL.
+fn flow_meta_from_row(row: &SqliteRow) -> Result<HttpFlow, sqlx::Error> {
+    let timestamp = parse_timestamp(&row.try_get::<String, _>("timestamp")?)?;
+    Ok(HttpFlow {
+        id: row.try_get("id")?,
+        session_id: row.try_get("session_id")?,
+        timestamp,
+        method: parse_method(&row.try_get::<String, _>("method")?)?,
+        host: row.try_get("host")?,
+        ip: row.try_get("ip")?,
+        path: row.try_get("path")?,
+        full_url: row.try_get("full_url")?,
+        request_headers: std::collections::BTreeMap::new(),
+        request_body: None,
+        request_cookies: decode_vec(&row.try_get::<String, _>("request_cookies")?)?,
+        request_cookie_values: decode_map(&row.try_get::<String, _>("request_cookie_values")?)?,
+        response_status: u16::try_from(row.try_get::<i64, _>("response_status")?).unwrap_or(0),
+        response_headers: std::collections::BTreeMap::new(),
+        response_body: None,
+        response_body_len: usize::try_from(row.try_get::<i64, _>("response_body_len")?)
+            .unwrap_or(0),
         response_cookies: decode_vec(&row.try_get::<String, _>("response_cookies")?)?,
         response_cookie_values: decode_map(&row.try_get::<String, _>("response_cookie_values")?)?,
         content_type: row.try_get("content_type")?,

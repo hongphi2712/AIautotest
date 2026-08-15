@@ -5,7 +5,8 @@
   "scripts": {
     "predev": "node scripts/cleanup-dev.js",
     "tauri": "tauri",
-    "dev": "tauri dev"
+    "dev": "tauri dev",
+    "dev:release": "taskkill /F /IM api-tester-server.exe /T >nul 2>&1 & cargo build --release -p api-tester-server && start \"\" ..\\..\\target\\release\\api-tester-server.exe"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
