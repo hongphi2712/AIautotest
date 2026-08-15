@@ -94,3 +94,17 @@ incremental = false
 
 [profile.dev.package."*"]
 debug = false
+
+# Release builds: dependencies at opt-level 1 keep LLVM from saturating cores
+# (default -O3 on ~350 crates pegs the CPU), while thin-LTO + strip keep the
+# single self-contained exe small. Runtime here is I/O-bound (UI + proxy), so
+# opt-level 1 is more than enough for our own crates too.
+[profile.release]
+lto = "thin"
+codegen-units = 8
+strip = true
+debug = false
+
+[profile.release.package."*"]
+opt-level = 1
+
