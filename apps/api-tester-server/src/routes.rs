@@ -8,6 +8,7 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::serialization::{FlowFilters, FlowSummary, RepeaterRequest};
 use crate::state::AppState;
@@ -40,6 +41,13 @@ pub fn router(state: SharedState, ui_dir: String) -> Router {
         .route("/api/intercept/clear", post(intercept_clear))
         .route("/ws", get(ws::ws_handler))
         .fallback_service(ServeDir::new(ui_dir))
+        // Never cache the UI/JS so the browser always loads the latest modules
+        // (avoids stale-import errors like `invoke` after a Tauri->REST
+        // migration); the static UI is small and served locally.
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        ))
         .with_state(state)
 }
 
