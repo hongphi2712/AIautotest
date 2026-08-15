@@ -1,5 +1,5 @@
-//! Application logic as `AppState` methods (ex-Tauri commands). The axum
-//! routes layer calls these directly; there is no IPC/serde boundary anymore.
+//! Application logic as `AppState` methods (ex-Tauri commands, now plain async
+//! methods called by the axum routes). There is no IPC/serde boundary anymore.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

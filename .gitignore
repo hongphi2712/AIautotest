@@ -2,10 +2,6 @@
 /target/
 *.pdb
 
-# Tauri / desktop UI
-node_modules/
-apps/api-tester-server/src-tauri/gen/
-
 # Legacy Python (kept local only, not part of the Rust product)
 *.py
 *.py[cod]

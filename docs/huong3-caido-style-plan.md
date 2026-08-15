@@ -88,3 +88,14 @@ Proxy MITM @ 127.0.0.1:8080  (unchanged: cert / CRL / scope / intercept)
 - P3: full UI via browser.
 - P4: browse → flow appears instantly; intercept live; proxy pill live.
 - P5: 223 backend tests, clippy, manual full flow, exe/RAM.
+
+## Done (results)
+- P1–P4 committed (953a323, e1a2be3). Tauri removed; axum + REST + WebSocket.
+- P5: npm/node tooling deleted; .gitignore cleaned.
+- Release build: **102 crates, 189s** (was 348 crates/464s with Tauri).
+- Exe: **11.1 MB** (was 17.4 MB).
+- Runtime RAM (app process only): **~8 MB** (was ~380 MB incl. WebView2); UI runs in
+  the user's browser, so no embedded Chromium.
+- WS real-time verified: curl through the proxy captured a flow and the browser
+  WebSocket received it instantly (flows 1545 → 1546).
+

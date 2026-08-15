@@ -30,9 +30,9 @@ pub fn database_path() -> PathBuf {
     data_dir().join("api-tester.db")
 }
 
-/// Shared state managed by Tauri. All async backend work runs on a dedicated
-/// background tokio runtime so the UI never blocks and the proxy's tokio
-/// primitives (net/time) are available regardless of Tauri's own runtime.
+/// Shared state managed by the app. All async backend work runs on a dedicated
+/// background tokio runtime so the HTTP/UI thread never blocks and the proxy's
+/// tokio primitives (net/time) are available regardless of the server runtime.
 pub struct AppState {
     pub config: AppConfig,
     pub buffer: Arc<RingBuffer<HttpFlow>>,
