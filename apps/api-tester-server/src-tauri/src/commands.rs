@@ -162,6 +162,7 @@ pub async fn repeater_send(
         status: sent.status,
         length: sent.body.len(),
         body: String::from_utf8_lossy(&sent.body).into_owned(),
+        headers: sent.headers,
     })
 }
 

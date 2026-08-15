@@ -33,6 +33,16 @@ impl HttpClient for ReqwestHttpClient {
             .await
             .map_err(|error| PortError::Transient(error.to_string()))?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_owned(),
+                    String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
         let body = response
             .bytes()
             .await
@@ -40,7 +50,7 @@ impl HttpClient for ReqwestHttpClient {
             .to_vec();
         Ok(HttpResponse {
             status,
-            headers: Vec::new(),
+            headers,
             body,
         })
     }

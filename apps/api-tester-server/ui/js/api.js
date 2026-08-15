@@ -206,3 +206,158 @@ export function highlightJson(text) {
     return match;
   });
 }
+
+/// Parses an HTTP request given in wire format into its parts. Used by the
+/// Repeater to turn the user-edited text back into a sendable request.
+export function parseHttpRequest(text) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let start = 0;
+  while (start < lines.length && !lines[start].trim()) start++;
+  const requestLine = (lines[start] || '').trim();
+  const parts = requestLine.split(/\s+/);
+  const method = parts[0] || 'GET';
+  const path = parts[1] || '/';
+  const version = parts[2] || 'HTTP/1.1';
+
+  const headers = [];
+  let j = start + 1;
+  while (j < lines.length && lines[j].trim() !== '') {
+    const idx = lines[j].indexOf(':');
+    if (idx > 0) {
+      headers.push({ name: lines[j].slice(0, idx).trim(), value: lines[j].slice(idx + 1).trim() });
+    }
+    j++;
+  }
+  const body = lines.slice(j + 1).join('\n');
+  const host = headers.find((h) => h.name.toLowerCase() === 'host')?.value || 'example.com';
+  const url = `http://${host}${path}`;
+  return { method, path, version, headers, body, url };
+}
+
+/// Parses an HTTP response wire text into status/reason/headers/body.
+export function parseWireResponse(text) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let start = 0;
+  while (start < lines.length && !lines[start].trim()) start++;
+  const match = (lines[start] || '').match(/^(\S+)\s+(\d{3})(?:\s+(.*))?$/);
+  const status = match ? Number(match[2]) : 0;
+  const reason = match ? (match[3] || '') : '';
+  const headers = [];
+  let j = start + 1;
+  while (j < lines.length && lines[j].trim() !== '') {
+    const idx = lines[j].indexOf(':');
+    if (idx > 0) {
+      headers.push({ name: lines[j].slice(0, idx).trim(), value: lines[j].slice(idx + 1).trim() });
+    }
+    j++;
+  }
+  const body = lines.slice(j + 1).join('\n');
+  return { status, reason, headers, body };
+}
+
+/// Parses query parameters out of a URL.
+export function parseQueryParams(url) {
+  const out = [];
+  try {
+    const parsed = new URL(url);
+    for (const [name, value] of parsed.searchParams.entries()) {
+      out.push({ name, value });
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+/// Best-effort body parameter extraction for the inspector.
+export function parseBodyParams(contentType, body) {
+  const ct = (contentType || '').toLowerCase();
+  const out = [];
+  if (!body) return out;
+  if (isJsonContentType(ct)) {
+    try {
+      const parsed = JSON.parse(body);
+      for (const [name, value] of Object.entries(parsed)) {
+        out.push({ name, value: value && typeof value === 'object' ? JSON.stringify(value) : String(value) });
+      }
+    } catch { /* not JSON after all */ }
+    return out;
+  }
+  if (ct.includes('x-www-form-urlencoded')) {
+    for (const pair of body.split('&')) {
+      if (!pair) continue;
+      const [name, value] = pair.split('=');
+      if (name) out.push({ name: decodeURIComponent(name), value: decodeURIComponent(value || '') });
+    }
+    return out;
+  }
+  if (ct.includes('multipart/form-data')) {
+    const names = [...body.matchAll(/name="([^"]+)"/g)].map((m) => m[1]);
+    names.forEach((name) => out.push({ name, value: '(multipart part)' }));
+    return out;
+  }
+  return out;
+}
+
+/// Parses cookie headers (`Cookie` for requests, `Set-Cookie` for responses).
+export function parseCookies(headers, response) {
+  const out = [];
+  const wanted = response ? 'set-cookie' : 'cookie';
+  for (const header of headers || []) {
+    if ((header.name || '').toLowerCase() !== wanted) continue;
+    for (const part of String(header.value || '').split(/;\s*/)) {
+      const idx = part.indexOf('=');
+      if (idx > 0) out.push({ name: part.slice(0, idx).trim(), value: part.slice(idx + 1).trim() });
+    }
+  }
+  return out;
+}
+
+/// Renders an HTTP request/response wire text as escaped, syntax-highlighted
+/// HTML (status line, header names, and JSON bodies). Safe for `innerHTML`.
+export function renderHttpWire(text, kind) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let start = 0;
+  while (start < lines.length && !lines[start].trim()) start++;
+  const blank = lines.findIndex((l, i) => i > start && l.trim() === '');
+  const headEnd = blank === -1 ? lines.length : blank;
+  const head = lines.slice(start, headEnd);
+  const body = blank === -1 ? '' : lines.slice(blank + 1).join('\n');
+
+  let contentType = '';
+  let html = '';
+  head.forEach((line, i) => {
+    if (i === 0) {
+      if (kind === 'request') {
+        const parts = line.trim().split(/\s+/);
+        html += `<span class="http-method">${escapeHtmlInline(parts[0] || '')}</span> <span class="http-path">${escapeHtmlInline(parts[1] || '')}</span> <span class="http-version">${escapeHtmlInline(parts[2] || '')}</span>`;
+      } else {
+        html += `<span class="http-status-line">${escapeHtmlInline(line)}</span>`;
+      }
+      html += '\n';
+      return;
+    }
+    const idx = line.indexOf(':');
+    if (idx > 0) {
+      const name = line.slice(0, idx);
+      const value = line.slice(idx + 1).trim();
+      if (name.toLowerCase() === 'content-type') contentType = value;
+      html += `<span class="http-header-name">${escapeHtmlInline(name)}</span>: ${escapeHtmlInline(value)}`;
+    } else {
+      html += escapeHtmlInline(line);
+    }
+    html += '\n';
+  });
+
+  if (body) {
+    const ct = contentType.toLowerCase();
+    if (isJsonContentType(ct) || body.trim().startsWith('{') || body.trim().startsWith('[')) {
+      const pretty = prettyBody(ct, body);
+      html += '\n' + highlightJson(pretty);
+    } else {
+      html += '\n' + escapeHtmlInline(body);
+    }
+  }
+  return html;
+}

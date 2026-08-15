@@ -100,6 +100,7 @@ pub struct RepeaterResponse {
     pub status: u16,
     pub length: usize,
     pub body: String,
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
