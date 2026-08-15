@@ -401,7 +401,9 @@ export class RepeaterView extends HTMLElement {
     const headers = {};
     for (const header of parsed.headers) {
       const lower = header.name.toLowerCase();
-      if (lower === 'content-length' || lower === 'transfer-encoding') continue;
+      // Host/content-length/transfer-encoding are derived by reqwest from the
+      // URL and body; sending a stale copy conflicts with the URL authority.
+      if (lower === 'host' || lower === 'content-length' || lower === 'transfer-encoding') continue;
       headers[header.name] = header.value;
     }
     status.textContent = 'Sending...';
@@ -462,7 +464,9 @@ export class RepeaterView extends HTMLElement {
 
 function buildRequestWire(flow) {
   const headers = formatHeaders(flow.request_headers || {});
-  return `${flow.method} ${flow.path} HTTP/1.1\n${headers}\n\n${flow.request_body || ''}`;
+  // Use the absolute URL so the scheme (http vs https) survives the round trip
+  // into the Repeater; origin-form would default to plain http.
+  return `${flow.method} ${flow.full_url} HTTP/1.1\n${headers}\n\n${flow.request_body || ''}`;
 }
 
 customElements.define('repeater-view', RepeaterView);

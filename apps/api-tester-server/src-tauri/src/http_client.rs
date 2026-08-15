@@ -1,11 +1,37 @@
 use api_tester_ports::{HttpClient, HttpRequest, HttpResponse, PortError};
 use async_trait::async_trait;
+use std::error::Error as _;
 
 /// Real HTTP client used by the Repeater (and later the auth/scanner real
 /// execution). Accepts self-signed certificates so local HTTPS targets work
 /// out of the box.
 pub struct ReqwestHttpClient {
     client: reqwest::Client,
+}
+
+/// Surfaces the underlying cause of a reqwest failure instead of the generic
+/// `error sending request for url (...)` wrapper: walks the source chain and
+/// reports timeouts distinctly.
+fn reqwest_error_message(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "request timed out".to_owned();
+    }
+    let mut message = error.to_string();
+    let mut source = error.source();
+    let mut depth = 0;
+    while let Some(cause) = source {
+        if depth >= 2 {
+            break;
+        }
+        let cause_text = cause.to_string();
+        if cause_text != message {
+            message.push_str(": ");
+            message.push_str(&cause_text);
+        }
+        source = cause.source();
+        depth += 1;
+    }
+    message
 }
 
 impl ReqwestHttpClient {
@@ -31,7 +57,7 @@ impl HttpClient for ReqwestHttpClient {
             .body(request.body.unwrap_or_default())
             .send()
             .await
-            .map_err(|error| PortError::Transient(error.to_string()))?;
+            .map_err(|error| PortError::Transient(reqwest_error_message(&error)))?;
         let status = response.status().as_u16();
         let headers = response
             .headers()
