@@ -44,7 +44,6 @@ async function refreshProxyStatus() {
       sbProxy.textContent = status.running ? 'Proxy: ' + status.address : 'Proxy: stopped';
       sbProxy.className = status.running ? 'ok' : 'warn';
     }
-    window.dispatchEvent(new CustomEvent('app:proxy-status', { detail: status }));
     return status;
   } catch (error) {
     showError('Cannot reach backend: ' + error);

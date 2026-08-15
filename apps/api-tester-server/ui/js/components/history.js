@@ -1,6 +1,7 @@
 import {
   invoke, formatStatus, colorStatus, formatTime, shortCookies, shortUrl, toHex,
   formatHeaders, showError, buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson,
+  parseQueryParams, parseBodyParams,
 } from '../api.js';
 import './message-viewer.js';
 
@@ -142,8 +143,6 @@ export class HistoryView extends HTMLElement {
       this.querySelector('#detail-title').textContent = f.method + ' ' + f.full_url + '  |  HTTP ' + formatStatus(f.status) + '  |  ' + f.length + ' chars';
 
       const query = f.path.includes('?') ? f.path.split('?')[1] : '';
-      const entries = Object.entries(f.request_cookie_values || {}).concat(Object.entries(f.response_cookie_values || {}));
-      const rows = entries.map(([name, value]) => `<tr><td>${name}</td><td>${value}</td></tr>`).join('');
       const requestHeaders = formatHeaders(f.request_headers);
       const responseHeaders = formatHeaders(f.response_headers);
       const reqCt = contentTypeFromHeaders(f.request_headers);
@@ -157,6 +156,26 @@ export class HistoryView extends HTMLElement {
         body: f.response_body || '', contentType: respCt, date: f.timestamp,
       });
 
+      const cookies = Object.entries(f.request_cookie_values || {})
+        .concat(Object.entries(f.response_cookie_values || {}));
+      const sections = [
+        {
+          title: 'Request attributes',
+          rows: [
+            ['Method', f.method],
+            ['Path', f.path],
+            ['Status', formatStatus(f.status)],
+            ['Length', String(f.length)],
+            ['MIME', f.content_type || '-'],
+          ],
+        },
+        { title: 'Query parameters', rows: parseQueryParams(f.full_url).map((p) => [p.name, p.value]) },
+        { title: 'Body parameters', rows: parseBodyParams(reqCt, f.request_body || '').map((p) => [p.name, p.value]) },
+        { title: 'Cookies', rows: cookies },
+        { title: 'Request headers', rows: Object.entries(f.request_headers || {}) },
+        { title: 'Response headers', rows: Object.entries(f.response_headers || {}) },
+      ];
+
       this.viewer.data = {
         requestRaw: reqMsg.raw,
         requestPretty: reqMsg.pretty,
@@ -167,11 +186,7 @@ export class HistoryView extends HTMLElement {
         requestHex: toHex(f.request_body || ''),
         responseHex: toHex(f.response_body || ''),
         responseRender: f.response_body || '<p>(empty response)</p>',
-        attributes: f.method + ' ' + f.full_url + '\nStatus: ' + formatStatus(f.status) + '\nLength: ' + f.length + '\nMIME: ' + (f.content_type || '-'),
-        params: query ? decodeURIComponent(query.replace(/&/g, '\n')) : '-',
-        cookiesHtml: rows ? `<table class="cookie-table"><tr><th>Name</th><th>Value</th></tr>${rows}</table>` : null,
-        reqHeadersText: requestHeaders,
-        respHeadersText: responseHeaders,
+        inspectorSections: sections,
       };
       const sbSelection = document.getElementById('sb-selection');
       if (sbSelection) sbSelection.textContent = 'Selected: ' + f.method + ' ' + f.path;

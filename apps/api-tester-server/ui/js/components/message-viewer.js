@@ -3,14 +3,20 @@
 // Edit actions (edit/apply/cancel) are emitted as `viewer-action` events.
 // The req | res | inspector column widths are draggable (pointer events) and
 // persisted to localStorage; they never auto-size to content.
+import './inspector-panel.js';
 
 const MIN_PANEL = 120;
 const MIN_INSPECTOR = 150;
+
+function isInspector(element) {
+  return element.tagName === 'INSPECTOR-PANEL' || element.classList.contains('inspector-sidebar');
+}
 
 export class MessageViewer extends HTMLElement {
   connectedCallback() {
     const editable = this.hasAttribute('editable');
     this.innerHTML = this.template(editable);
+    this.inspector = this.querySelector('inspector-panel');
     this.applyPanelWidths();
     this.initResizers();
     this.addEventListener('click', (event) => {
@@ -68,14 +74,7 @@ export class MessageViewer extends HTMLElement {
         <div class="rv-pane" data-pane="render"><iframe class="render-frame" sandbox="" data-role="resp-render"></iframe></div>
       </div>
       <div class="resizer" data-side="resp"></div>
-      <aside class="inspector-sidebar">
-        <div class="inspector-title">Inspector</div>
-        <details class="inspector-group" open><summary>Request attributes</summary><div class="inspector-content" data-role="attributes">-</div></details>
-        <details class="inspector-group"><summary>Query parameters</summary><div class="inspector-content" data-role="params">-</div></details>
-        <details class="inspector-group"><summary>Cookies</summary><div class="inspector-content" data-role="cookies">-</div></details>
-        <details class="inspector-group"><summary>Request headers</summary><div class="inspector-content" data-role="req-headers-list">-</div></details>
-        <details class="inspector-group"><summary>Response headers</summary><div class="inspector-content" data-role="resp-headers-list">-</div></details>
-      </aside>
+      <inspector-panel id="inspector"></inspector-panel>
       ${editable ? `
       <div class="intercept-edit-overlay" data-role="edit-overlay">
         <div class="edit-form">
@@ -95,7 +94,7 @@ export class MessageViewer extends HTMLElement {
     if (!layout) return;
     const req = layout.querySelector('[data-panel="req"]');
     const resp = layout.querySelector('[data-panel="resp"]');
-    const sidebar = layout.querySelector('.inspector-sidebar');
+    const sidebar = layout.querySelector('inspector-panel');
     if (!req || !resp || !sidebar) return;
     const savedReq = Number(localStorage.getItem('viewer:req')) || 0;
     const savedResp = Number(localStorage.getItem('viewer:resp')) || 0;
@@ -125,8 +124,8 @@ export class MessageViewer extends HTMLElement {
         const startX = event.clientX;
         const leftStart = left.offsetWidth;
         const rightStart = right.offsetWidth;
-        const minLeft = left.classList.contains('inspector-sidebar') ? MIN_INSPECTOR : MIN_PANEL;
-        const minRight = right.classList.contains('inspector-sidebar') ? MIN_INSPECTOR : MIN_PANEL;
+        const minLeft = isInspector(left) ? MIN_INSPECTOR : MIN_PANEL;
+        const minRight = isInspector(right) ? MIN_INSPECTOR : MIN_PANEL;
         handle.classList.add('active');
         document.body.classList.add('resizing');
         try { handle.setPointerCapture(event.pointerId); } catch { /* noop */ }
@@ -157,7 +156,7 @@ export class MessageViewer extends HTMLElement {
   savePanelWidths() {
     const req = this.querySelector('[data-panel="req"]');
     const resp = this.querySelector('[data-panel="resp"]');
-    const sidebar = this.querySelector('.inspector-sidebar');
+    const sidebar = this.querySelector('inspector-panel');
     if (!req || !resp || !sidebar) return;
     localStorage.setItem('viewer:req', String(req.offsetWidth));
     localStorage.setItem('viewer:resp', String(resp.offsetWidth));
@@ -183,16 +182,9 @@ export class MessageViewer extends HTMLElement {
     q('req-hex').textContent = data.requestHex || '(empty)';
     q('resp-hex').textContent = data.responseHex || '(empty)';
     q('resp-render').srcdoc = data.responseRender || '<p>(empty response)</p>';
-    q('attributes').textContent = data.attributes || '-';
-    q('params').textContent = data.params || '-';
-    const cookies = q('cookies');
-    if (data.cookiesHtml) {
-      cookies.innerHTML = data.cookiesHtml;
-    } else {
-      cookies.textContent = data.cookies || '-';
+    if (this.inspector) {
+      this.inspector.data = { sections: data.inspectorSections || [] };
     }
-    q('req-headers-list').textContent = data.reqHeadersText || '-';
-    q('resp-headers-list').textContent = data.respHeadersText || '-';
     this.querySelectorAll('.rv-panel').forEach((panel) => {
       panel.querySelectorAll('.subtab').forEach((b, i) => b.classList.toggle('active', i === 0));
       panel.querySelectorAll('.rv-pane').forEach((p, i) => p.classList.toggle('active', i === 0));

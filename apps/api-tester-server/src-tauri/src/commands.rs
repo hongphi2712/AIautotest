@@ -9,7 +9,6 @@ use api_tester_proxy::{
     CertProvider, InterceptEdit, InterceptEntry, MatchReplaceEngine, ProxyServer,
     RcgenCertProvider, ScopeFilter, UpstreamClient,
 };
-use api_tester_storage::SqliteStore;
 use serde_json::json;
 use tauri::State;
 
@@ -18,7 +17,7 @@ use crate::serialization::{
     CertInfo, FlowDetail, FlowFilters, FlowSummary, ProxyStatus, RepeaterRequest, RepeaterResponse,
     SessionSummary, filter_flows,
 };
-use crate::state::{AppState, certs_dir, database_path};
+use crate::state::{AppState, certs_dir, open_store};
 
 #[tauri::command]
 pub async fn app_health(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
@@ -29,10 +28,15 @@ pub async fn app_health(state: State<'_, AppState>) -> Result<serde_json::Value,
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
         .take();
+    // Fast count (SQL COUNT + buffer length) instead of materializing the full
+    // `list_recent` window on the 2s health poll.
+    let flows = persisted_flow_count(&state)
+        .await
+        .max(state.buffer.len() as u64) as usize;
     Ok(json!({
         "status": "ok",
         "proxy_running": state.proxy_running.load(Ordering::SeqCst),
-        "flows": all_flows(&state).await.len(),
+        "flows": flows,
         "last_error": last_error,
     }))
 }
@@ -99,7 +103,7 @@ async fn persisted_flows(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
     state
         .runtime
         .spawn(async move {
-            if let Some(store) = open_store(store_arc).await {
+            if let Some(store) = open_store(&store_arc).await {
                 store.flows().list_recent(5000).await.unwrap_or_default()
             } else {
                 Vec::new()
@@ -109,12 +113,28 @@ async fn persisted_flows(state: &AppState) -> Vec<api_tester_domain::HttpFlow> {
         .unwrap_or_default()
 }
 
+/// Total persisted flow count (used by the dashboard health poll).
+async fn persisted_flow_count(state: &AppState) -> u64 {
+    let store_arc = state.store.clone();
+    state
+        .runtime
+        .spawn(async move {
+            if let Some(store) = open_store(&store_arc).await {
+                store.flows().count().await.unwrap_or(0)
+            } else {
+                0
+            }
+        })
+        .await
+        .unwrap_or(0)
+}
+
 async fn persisted_sessions(state: &AppState) -> Vec<Session> {
     let store_arc = state.store.clone();
     state
         .runtime
         .spawn(async move {
-            if let Some(store) = open_store(store_arc).await {
+            if let Some(store) = open_store(&store_arc).await {
                 store.sessions().list_recent(100).await.unwrap_or_default()
             } else {
                 Vec::new()
@@ -122,19 +142,6 @@ async fn persisted_sessions(state: &AppState) -> Vec<Session> {
         })
         .await
         .unwrap_or_default()
-}
-
-/// Opens the SQLite store lazily (shared with the proxy sink).
-async fn open_store(store: Arc<tokio::sync::Mutex<Option<SqliteStore>>>) -> Option<SqliteStore> {
-    let mut guard = store.lock().await;
-    if guard.is_none() {
-        let path = database_path();
-        let _ = std::fs::create_dir_all(path.parent()?);
-        *guard = SqliteStore::open(path.to_str().unwrap_or(":memory:"))
-            .await
-            .ok();
-    }
-    guard.clone()
 }
 
 #[tauri::command]
@@ -307,7 +314,7 @@ pub fn cert_info(state: State<'_, AppState>) -> CertInfo {
 pub fn install_ca(state: State<'_, AppState>) -> Result<CertInfo, String> {
     let path = ca_path(&state);
     if !path.exists() {
-        return Err("CA not generated yet — start the proxy first".to_owned());
+        return Err("CA not generated yet â€” start the proxy first".to_owned());
     }
     install_ca_win(&path)?;
     Ok(CertInfo {

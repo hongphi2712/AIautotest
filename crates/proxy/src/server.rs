@@ -116,6 +116,35 @@ struct FlowCaptureCtx {
     response_headers: http::HeaderMap,
 }
 
+/// Builds a capture context from the (possibly edited) request and the final
+/// response status/headers. Shared by the streaming and intercepted-response
+/// paths.
+#[allow(clippy::too_many_arguments)]
+fn build_ctx(
+    method: &HttpMethod,
+    host: &str,
+    ip: &str,
+    scheme: &str,
+    path: &str,
+    request_headers: &http::HeaderMap,
+    request_body: &[u8],
+    status: u16,
+    response_headers: &http::HeaderMap,
+) -> FlowCaptureCtx {
+    FlowCaptureCtx {
+        timestamp: chrono::Utc::now(),
+        method: method.clone(),
+        host: host.to_owned(),
+        ip: ip.to_owned(),
+        scheme: scheme.to_owned(),
+        path: path.to_owned(),
+        request_headers: request_headers.clone(),
+        request_body: request_body.to_vec(),
+        status,
+        response_headers: response_headers.clone(),
+    }
+}
+
 #[derive(Default)]
 struct CapturedBody {
     bytes: Vec<u8>,
@@ -740,18 +769,17 @@ impl ProxyServer {
                     self.session.clone(),
                     self.sink.clone(),
                     self.config.max_body_bytes,
-                    FlowCaptureCtx {
-                        timestamp: chrono::Utc::now(),
-                        method: method_from_str(method.as_str()),
-                        host: host.clone(),
-                        ip: client_ip.to_owned(),
-                        scheme: scheme.clone(),
-                        path: path.clone(),
-                        request_headers: request_headers.clone(),
-                        request_body: capture_request_body.clone(),
-                        status: status.as_u16(),
-                        response_headers: headers.clone(),
-                    },
+                    build_ctx(
+                        &method_from_str(method.as_str()),
+                        &host,
+                        client_ip,
+                        &scheme,
+                        &path,
+                        &request_headers,
+                        &capture_request_body,
+                        status.as_u16(),
+                        &headers,
+                    ),
                     body.to_vec(),
                 );
             }
@@ -769,18 +797,17 @@ impl ProxyServer {
         }
 
         let ctx = if capture {
-            Some(FlowCaptureCtx {
-                timestamp: chrono::Utc::now(),
-                method: method_from_str(method.as_str()),
-                host: host.clone(),
-                ip: client_ip.to_owned(),
-                scheme: scheme.clone(),
-                path: path.clone(),
-                request_headers: request_headers.clone(),
-                request_body: capture_request_body.clone(),
-                status: response_parts.status.as_u16(),
-                response_headers: response_parts.headers.clone(),
-            })
+            Some(build_ctx(
+                &method_from_str(method.as_str()),
+                &host,
+                client_ip,
+                &scheme,
+                &path,
+                &request_headers,
+                &capture_request_body,
+                response_parts.status.as_u16(),
+                &response_parts.headers,
+            ))
         } else {
             None
         };

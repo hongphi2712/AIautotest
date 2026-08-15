@@ -289,7 +289,6 @@ dependencies = [
 name = "api-tester-server"
 version = "0.1.0"
 dependencies = [
- "api-tester-analysis",
  "api-tester-capture",
  "api-tester-config",
  "api-tester-domain",

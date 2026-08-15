@@ -13,12 +13,6 @@ export function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export function getExtension(path) {
-  const clean = path.split('?')[0];
-  const m = clean.match(/\.([a-z0-9]+)$/i);
-  return m ? m[1] : '-';
-}
-
 export function shortCookies(cookies) {
   if (!cookies || !cookies.length) return '-';
   return cookies.length + ' cookie' + (cookies.length === 1 ? '' : 's');
@@ -157,13 +151,21 @@ export function isJsonContentType(contentType) {
   return (contentType || '').toLowerCase().includes('json');
 }
 
-/// Reads the content-type header from a headers object or `[{name,value}]` list.
+/// Reads the content-type header from a headers object, a `{name,value}` list,
+/// or a `[name, value]` tuple list (repeater responses).
 export function contentTypeFromHeaders(headers) {
   if (!headers) return '';
   const find = (name) => {
     if (Array.isArray(headers)) {
-      const hit = headers.find((h) => h && h.name && h.name.toLowerCase() === name);
-      return hit ? hit.value : '';
+      const hit = headers.find((h) => {
+        if (h && typeof h === 'object' && h.name !== undefined) {
+          return String(h.name).toLowerCase() === name;
+        }
+        if (Array.isArray(h)) return String(h[0]).toLowerCase() === name;
+        return false;
+      });
+      if (!hit) return '';
+      return hit.name !== undefined ? String(hit.value) : String(hit[1]);
     }
     if (typeof headers === 'object') {
       const key = Object.keys(headers).find((k) => k.toLowerCase() === name);
@@ -174,13 +176,19 @@ export function contentTypeFromHeaders(headers) {
   return find('content-type');
 }
 
+/// Canonical start line for an HTTP request (`METHOD url HTTP/1.1`) or
+/// response (`HTTP/2 status reason`).
+export function httpStartLine({ method, url, status, reason }) {
+  return status != null
+    ? `HTTP/2 ${status}${reason ? ' ' + reason : ''}`
+    : `${method} ${url} HTTP/1.1`;
+}
+
 /// Builds `raw` (as-stored) and `pretty` (formatted) message texts for the
 /// message viewer. `status != null` renders a response start line and, when the
 /// headers lack one, injects a `Date:` header from `date`.
 export function buildMessage({ method, url, status, reason, headersText, body, contentType, date }) {
-  const startLine = status != null
-    ? `HTTP/2 ${status}${reason ? ' ' + reason : ''}`
-    : `${method} ${url} HTTP/1.1`;
+  const startLine = httpStartLine({ method, url, status, reason });
   const head = status != null ? ensureDateHeader(headersText, date) : headersText;
   const raw = startLine + '\n' + head + '\n\n' + (body || '');
   const pretty = startLine + '\n' + head + '\n\n' + prettyBody(contentType, body);
@@ -242,28 +250,6 @@ export function parseHttpRequest(text) {
     } catch { /* keep original path */ }
   }
   return { method, path, version, headers, body, url };
-}
-
-/// Parses an HTTP response wire text into status/reason/headers/body.
-export function parseWireResponse(text) {
-  const normalized = String(text || '').replace(/\r\n/g, '\n');
-  const lines = normalized.split('\n');
-  let start = 0;
-  while (start < lines.length && !lines[start].trim()) start++;
-  const match = (lines[start] || '').match(/^(\S+)\s+(\d{3})(?:\s+(.*))?$/);
-  const status = match ? Number(match[2]) : 0;
-  const reason = match ? (match[3] || '') : '';
-  const headers = [];
-  let j = start + 1;
-  while (j < lines.length && lines[j].trim() !== '') {
-    const idx = lines[j].indexOf(':');
-    if (idx > 0) {
-      headers.push({ name: lines[j].slice(0, idx).trim(), value: lines[j].slice(idx + 1).trim() });
-    }
-    j++;
-  }
-  const body = lines.slice(j + 1).join('\n');
-  return { status, reason, headers, body };
 }
 
 /// Parses query parameters out of a URL.

@@ -136,6 +136,15 @@ impl FlowRepository for SqliteFlowRepository {
 }
 
 impl SqliteFlowRepository {
+    /// Total persisted flows across all sessions. Used by the dashboard count,
+    /// which avoids materializing `list_recent` rows on the 2s health poll.
+    pub async fn count(&self) -> Result<u64, PortError> {
+        sqlx::query_scalar("SELECT COUNT(*) FROM flows")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(port_error)
+    }
+
     /// Most recent flows across all sessions, newest first. Used by the
     /// dashboard to show persisted history after a restart.
     pub async fn list_recent(&self, limit: u64) -> Result<Vec<HttpFlow>, PortError> {

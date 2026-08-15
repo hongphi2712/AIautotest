@@ -1,6 +1,6 @@
 import {
   invoke, toHex, escapeHtml, showError, formatHeaders, parseHttpRequest, parseQueryParams,
-  parseBodyParams, parseCookies, renderHttpWire,
+  parseBodyParams, parseCookies, renderHttpWire, contentTypeFromHeaders, httpStartLine,
 } from '../api.js';
 import './inspector-panel.js';
 
@@ -342,8 +342,7 @@ export class RepeaterView extends HTMLElement {
       return;
     }
     const parsed = parseHttpRequest(tab.requestText);
-    const contentType =
-      parsed.headers.find((h) => h.name.toLowerCase() === 'content-type')?.value || '';
+    const contentType = contentTypeFromHeaders(parsed.headers);
     const sections = [
       {
         title: 'Request attributes',
@@ -363,8 +362,7 @@ export class RepeaterView extends HTMLElement {
 
     const response = tab.response;
     if (response) {
-      const respCt =
-        response.headers.find(([name]) => name.toLowerCase() === 'content-type')?.[1] || '';
+      const respCt = contentTypeFromHeaders(response.headers);
       sections.push({
         title: 'Response status',
         rows: [
@@ -449,13 +447,11 @@ export class RepeaterView extends HTMLElement {
       return;
     }
     const headerText = response.headers.map(([name, value]) => `${name}: ${value}`).join('\n');
-    const reason = statusReason(response.status);
-    const wire = `HTTP/2 ${response.status}${reason ? ' ' + reason : ''}\n${headerText}\n\n${response.body}`;
+    const wire = `${httpStartLine({ status: response.status, reason: statusReason(response.status) })}\n${headerText}\n\n${response.body}`;
     pretty.innerHTML = renderHttpWire(wire, 'response');
     raw.textContent = wire;
     hex.textContent = toHex(response.body);
-    const contentType =
-      response.headers.find(([name]) => name.toLowerCase() === 'content-type')?.[1] || '';
+    const contentType = contentTypeFromHeaders(response.headers);
     frame.srcdoc = contentType.toLowerCase().includes('html')
       ? response.body
       : '<p>(response is not HTML)</p>';

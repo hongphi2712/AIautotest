@@ -1,6 +1,7 @@
 import {
   invoke, formatTime, colorStatus, toHex, formatHeaders, showError, openBrowser,
   buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson,
+  parseQueryParams, parseBodyParams, parseCookies,
 } from '../api.js';
 import './message-viewer.js';
 
@@ -257,6 +258,22 @@ export class InterceptView extends HTMLElement {
       if (isJsonContentType(ct)) responsePrettyHtml = highlightJson(respMsg.pretty);
     }
 
+    const sections = [
+      {
+        title: 'Request attributes',
+        rows: [
+          ['Method', f.method],
+          ['URL', f.url],
+          ['Status', f.status != null ? String(f.status) : '-'],
+          ['Length', String(f.body_len || (f.body ? f.body.length : 0))],
+        ],
+      },
+      { title: 'Query parameters', rows: parseQueryParams(f.url).map((p) => [p.name, p.value]) },
+      { title: 'Body parameters', rows: parseBodyParams(ct, f.body || '').map((p) => [p.name, p.value]) },
+      { title: 'Cookies', rows: parseCookies(f.headers, f.kind === 'response').map((c) => [c.name, c.value]) },
+      { title: f.kind === 'response' ? 'Response headers' : 'Request headers', rows: f.headers.map((h) => [h.name, h.value]) },
+    ];
+
     this.viewer.data = {
       requestRaw: reqMsg.raw,
       requestPretty: reqMsg.pretty,
@@ -267,11 +284,7 @@ export class InterceptView extends HTMLElement {
       requestHex: toHex(f.body || ''),
       responseHex: f.kind === 'response' ? toHex(f.body || '') : '',
       responseRender: f.kind === 'response' ? (f.body || '<p>(empty response)</p>') : '<p>(response not held)</p>',
-      attributes: f.method + ' ' + f.url + '\nStatus: ' + (f.status || '-') + '\nLength: ' + (f.body_len || f.body.length || 0),
-      params: '-',
-      cookies: '-',
-      reqHeadersText: headers,
-      respHeadersText: f.kind === 'response' ? headers : '-',
+      inspectorSections: sections,
     };
 
     const q = (role) => this.viewer.querySelector('[data-role="' + role + '"]');

@@ -77,14 +77,22 @@ impl AppState {
 
     /// Opens the SQLite store once, lazily.
     pub async fn store(&self) -> Option<SqliteStore> {
-        let mut guard = self.store.lock().await;
-        if guard.is_none() {
-            let path = database_path();
-            let _ = std::fs::create_dir_all(data_dir());
-            *guard = SqliteStore::open(path.to_str().unwrap_or(":memory:"))
-                .await
-                .ok();
-        }
-        guard.clone()
+        open_store(&self.store).await
     }
+}
+
+/// Opens the SQLite store lazily (shared with the proxy sink and the command
+/// layer). The single connection is cached in `AppState::store`.
+pub async fn open_store(
+    store: &Arc<tokio::sync::Mutex<Option<SqliteStore>>>,
+) -> Option<SqliteStore> {
+    let mut guard = store.lock().await;
+    if guard.is_none() {
+        let path = database_path();
+        let _ = std::fs::create_dir_all(data_dir());
+        *guard = SqliteStore::open(path.to_str().unwrap_or(":memory:"))
+            .await
+            .ok();
+    }
+    guard.clone()
 }

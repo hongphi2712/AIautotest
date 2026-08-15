@@ -137,3 +137,20 @@ async fn list_by_session_returns_matching_flows() {
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].path, "/api/orders");
 }
+
+#[tokio::test]
+async fn count_tracks_total_persisted_flows() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let store = store_at(&directory.path().join("data.db")).await;
+
+    assert_eq!(store.flows().count().await.unwrap(), 0);
+    for i in 0..5 {
+        let flow = HttpFlow::new(HttpMethod::Get, "example.com", format!("/x/{i}"));
+        store.flows().save(&flow).await.unwrap();
+    }
+    assert_eq!(store.flows().count().await.unwrap(), 5);
+
+    // Reopening a fresh store over the same file sees the persisted count.
+    let reopened = store_at(&directory.path().join("data.db")).await;
+    assert_eq!(reopened.flows().count().await.unwrap(), 5);
+}

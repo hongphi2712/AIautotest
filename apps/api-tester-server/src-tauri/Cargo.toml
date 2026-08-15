@@ -10,7 +10,6 @@ authors.workspace = true
 tauri-build = { workspace = true }
 
 [dependencies]
-api-tester-analysis.workspace = true
 api-tester-capture.workspace = true
 api-tester-config.workspace = true
 api-tester-domain.workspace = true
