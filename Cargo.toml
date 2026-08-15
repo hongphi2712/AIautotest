@@ -85,3 +85,12 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+
+# Keep debug builds small: line-tables-only debug info (~90% smaller artifacts)
+# and disable incremental cache bloat so target/ stops growing unbounded.
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.dev.package."*"]
+debug = false
