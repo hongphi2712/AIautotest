@@ -6,6 +6,8 @@ const state = {
   selectedTaskId: null,
   liveTaskId: null,
   proxy: { running: false, address: '' },
+  activeSessionId: null,
+  sessions: [],
 };
 
 const subscribers = new Set();
@@ -33,6 +35,27 @@ export function getLive() {
 
 export function getProxy() {
   return state.proxy;
+}
+export function setSession(sessionId) {
+  state.activeSessionId = sessionId || null;
+  emit();
+}
+
+export function setSessions(sessions) {
+  state.sessions = sessions || [];
+  emit();
+}
+
+export function getActiveSessionId() {
+  return state.activeSessionId;
+}
+
+export function getSessions() {
+  return state.sessions;
+}
+
+export function getActiveSession() {
+  return state.sessions.find((s) => s.id === state.activeSessionId) || null;
 }
 
 let taskSeq = 0;

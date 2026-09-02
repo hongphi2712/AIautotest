@@ -36,6 +36,14 @@ impl<T> RingBuffer<T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Removes every buffered item. Used by the UI's "Clear log" action.
+    pub fn clear(&self) {
+        self.data
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clear();
+    }
 }
 
 impl<T: Clone> RingBuffer<T> {
@@ -62,5 +70,17 @@ mod tests {
 
         assert_eq!(buffer.len(), 3);
         assert_eq!(buffer.snapshot(), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn clear_empties_the_buffer() {
+        let buffer = RingBuffer::new(3);
+        buffer.push(1);
+        buffer.push(2);
+
+        buffer.clear();
+
+        assert_eq!(buffer.len(), 0);
+        assert!(buffer.snapshot().is_empty());
     }
 }

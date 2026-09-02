@@ -1,0 +1,17 @@
+:root {
+  --bg: #f5f5f6;
+  --panel: #ffffff;
+  --panel-2: #eceff1;
+  --panel-3: #f8f9fa;
+  --border: #d3d7db;
+  --border-2: #c3c9cf;
+  --text: #23272e;
+  --muted: #5b6470;
+  --accent: #f97316;
+  --accent-dark: #ea580c;
+  --blue: #1976d2;
+  --green: #16a34a;
+  --red: #dc2626;
+  --orange: #d97706;
+  --mono: "Cascadia Code", Consolas, monospace;
+}

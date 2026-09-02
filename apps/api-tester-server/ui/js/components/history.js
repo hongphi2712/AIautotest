@@ -1,19 +1,28 @@
 import {
-  apiGet, formatStatus, colorStatus, formatTime, shortCookies, shortUrl, toHex,
+  apiGet, apiPost, formatStatus, colorStatus, formatTime, shortCookies, shortUrl, toHex,
   formatHeaders, showError, buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson,
   parseQueryParams, parseBodyParams,
 } from '../api.js';
+import { getActiveSessionId, getSessions, setSessions, subscribe } from '../store.js';
 import './message-viewer.js';
+
+function sessions_find(id) {
+  if (!id) return null;
+  return getSessions().find((s) => s.id === id) || null;
+}
+
 
 const TEMPLATE = `
   <div class="logger-wrap">
     <div class="toolbar">
       <strong>HTTP history</strong>
       <select id="f-method"><option value="">All methods</option><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option><option>PATCH</option><option>OPTIONS</option></select>
+      <select id="f-session"><option value="">All sessions</option></select>
       <input id="f-host" placeholder="Filter host...">
       <input id="f-search" placeholder="Search path/host...">
       <button id="refresh">Refresh</button>
       <button id="to-repeater">Send to Repeater</button>
+      <button id="clear-log" class="danger">Clear log</button>
       <span id="count" class="muted" style="margin-left:auto">0 requests</span>
     </div>
     <div class="table-scroll" id="table-scroll">
@@ -48,6 +57,7 @@ export class HistoryView extends HTMLElement {
     });
     this.querySelector('#refresh').addEventListener('click', () => this.loadFlows());
     this.querySelector('#to-repeater').addEventListener('click', () => this.sendSelectedToRepeater());
+    this.querySelector('#clear-log').addEventListener('click', () => this.clearLog());
     this.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('click', () => {
       const key = th.dataset.sort;
       if (this.sortKey !== key) { this.sortKey = key; this.sortDir = 1; }
@@ -62,30 +72,82 @@ export class HistoryView extends HTMLElement {
     this.onWsFlow = (event) => {
       const flow = event.detail && event.detail.flow;
       if (!flow) return;
+      // Respect session filter: don't inject cross-session flows via WS (FlowSummary now has session_id)
+      const sel = this.querySelector('#f-session')?.value || '';
+      if (sel && flow.session_id && flow.session_id !== sel) return;
       if (this.currentFlows.some((f) => f.id === flow.id)) return;
       this.currentFlows.unshift(flow);
       this.render();
     };
     window.addEventListener('app:ws-flow', this.onWsFlow);
+    this.onWsCleared = () => this.handleCleared();
+    window.addEventListener('app:ws-flows-cleared', this.onWsCleared);
 
     this.loadFlows();
     this.timer = setInterval(() => this.loadFlows(), 2000);
+    this.querySelector('#f-session')?.addEventListener('change', () => this.loadFlows());
+    this.sessionUnsubscribe = subscribe(() => this.renderSessionOptions());
+    void this.loadSessions();
   }
 
   disconnectedCallback() {
     if (this.timer) clearInterval(this.timer);
     window.removeEventListener('app:ws-flow', this.onWsFlow);
+    window.removeEventListener('app:ws-flows-cleared', this.onWsCleared);
+    if (this.sessionUnsubscribe) this.sessionUnsubscribe();
+  }
+
+  async clearLog() {
+    if (!window.confirm('Xóa toàn bộ HTTP history?')) return;
+    try {
+      await apiPost('/api/flows/clear');
+    } catch (error) {
+      showError('Clear log: ' + error);
+      return;
+    }
+    this.handleCleared();
+  }
+
+  /// Resets the local table/detail state after the log was cleared (by this
+  /// client or another one via WebSocket), then refreshes from the backend.
+  handleCleared() {
+    this.currentFlows = [];
+    this.selectedFlow = null;
+    this._renderFingerprint = null;
+    this.querySelector('#detail-title').textContent = 'Select a request';
+    this.viewer.data = {
+      requestRaw: '',
+      requestPretty: '',
+      requestPrettyHtml: null,
+      responseRaw: '',
+      responsePretty: '',
+      responsePrettyHtml: null,
+      requestHex: '',
+      responseHex: '',
+      responseRender: '',
+      inspectorSections: [],
+    };
+    this.render();
+    this.loadFlows();
   }
 
   async loadFlows() {
-    if (this.offsetParent === null) return;
+    // Always fetch even when hidden to warm cache; only skip render when hidden
+    let flows = [];
     try {
-      this.currentFlows = await apiGet('/api/flows');
-      this.render();
+      const sessionId = this.querySelector('#f-session')?.value || '';
+      const qs = sessionId ? '?session_id=' + encodeURIComponent(sessionId) : '';
+      flows = await apiGet('/api/flows' + qs);
+      this.currentFlows = flows;
     } catch (error) {
       showError('Dashboard API unavailable: ' + error);
+      return;
     }
+    if (this.offsetParent === null) return;
+    this.render();
   }
+
+  refresh() { return this.loadFlows(); }
 
   sortValue(f, key) {
     if (key === 'time') return new Date(f.timestamp).getTime();
@@ -108,6 +170,44 @@ export class HistoryView extends HTMLElement {
     );
   }
 
+  async loadSessions() {
+    try {
+      const sessions = await apiGet('/api/sessions');
+      setSessions(sessions);
+    } catch { /* non-critical */ }
+  }
+
+  renderSessionOptions() {
+    const select = this.querySelector('#f-session');
+    if (!select) return;
+    const sessions = getSessions();
+    const activeId = getActiveSessionId();
+    const current = select.value;
+    const hadUserSelection = select.dataset.userSelected === '1';
+    select.innerHTML = '<option value="">All sessions</option>';
+    sessions.forEach((s) => {
+      const opt = document.createElement('option');
+      const isActive = s.id === activeId;
+      const dot = isActive ? '\u25cf ' : '\u25cb ';
+      opt.value = s.id;
+      opt.textContent = dot + (s.name || s.id.slice(0, 8)) + ' (' + (s.flow_count || 0) + ' flows)';
+      if (isActive) opt.style.fontWeight = '600';
+      select.appendChild(opt);
+    });
+    // Thorough: default to All, preserve explicit user choice
+    if (current && sessions.some((s) => s.id === current)) {
+      select.value = current;
+    } else if (hadUserSelection && current === '') {
+      select.value = '';
+    } else {
+      select.value = '';
+    }
+    if (!select.dataset.bound) {
+      select.addEventListener('change', () => { select.dataset.userSelected = '1'; });
+      select.dataset.bound = '1';
+    }
+  }
+
   render() {
     const scroll = this.querySelector('#table-scroll');
     if (!scroll || scroll.offsetParent === null) return;
@@ -117,7 +217,10 @@ export class HistoryView extends HTMLElement {
     const fingerprint = flows.length + ':' + (flows[0]?.id || '') + ':' + (flows[flows.length - 1]?.id || '');
     if (fingerprint === this._renderFingerprint) return;
     this._renderFingerprint = fingerprint;
-    this.querySelector('#count').textContent = flows.length + ' requests';
+    const sessionSelect = this.querySelector('#f-session');
+      const selectedSession = sessions_find(sessionSelect ? sessionSelect.value : '');
+      const sessionLabel = selectedSession ? ' in "' + (selectedSession.name || selectedSession.id.slice(0, 8)) + '"' : '';
+      this.querySelector('#count').textContent = flows.length + ' requests' + sessionLabel;
     this.tbody.innerHTML = '';
     if (!flows.length) return;
     const fragment = document.createDocumentFragment();
@@ -210,4 +313,4 @@ export class HistoryView extends HTMLElement {
   }
 }
 
-customElements.define('history-view', HistoryView);
+if (!customElements.get('history-view')) customElements.define('history-view', HistoryView);

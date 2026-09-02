@@ -7,24 +7,33 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+api-tester-ai.workspace = true
+api-tester-analysis.workspace = true
 api-tester-capture.workspace = true
 api-tester-config.workspace = true
 api-tester-domain.workspace = true
 api-tester-events.workspace = true
 api-tester-ports.workspace = true
 api-tester-proxy.workspace = true
+api-tester-reporting.workspace = true
+api-tester-security.workspace = true
 api-tester-storage.workspace = true
+api-tester-workflow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 open.workspace = true
 reqwest.workspace = true
+scraper.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tower-http.workspace = true
+url.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 api-tester-test-support.workspace = true

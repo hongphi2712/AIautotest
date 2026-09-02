@@ -2,6 +2,7 @@ import {
   apiPost, toHex, escapeHtml, showError, formatHeaders, parseHttpRequest, parseQueryParams,
   parseBodyParams, parseCookies, renderHttpWire, contentTypeFromHeaders, httpStartLine,
 } from '../api.js';
+import { createUndoRedo, caretOffset, setCaret } from './editor-undo.js';
 import './inspector-panel.js';
 
 const STATUS_REASONS = {
@@ -20,40 +21,6 @@ function statusReason(code) {
 function tabName(method, path) {
   const short = path.length > 34 ? path.slice(0, 31) + '...' : path;
   return `${method} ${short}`;
-}
-
-function caretOffset(element) {
-  const selection = window.getSelection();
-  if (!selection.rangeCount) return 0;
-  const range = selection.getRangeAt(0);
-  const clone = range.cloneRange();
-  clone.selectNodeContents(element);
-  clone.setEnd(range.endContainer, range.endOffset);
-  return clone.toString().length;
-}
-
-function setCaret(element, offset) {
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let remaining = offset;
-  let node = walker.nextNode();
-  let target = element;
-  let pos = 0;
-  while (node) {
-    const length = node.textContent.length;
-    if (remaining <= length) {
-      target = node;
-      pos = remaining;
-      break;
-    }
-    remaining -= length;
-    node = walker.nextNode();
-  }
-  const range = document.createRange();
-  range.setStart(target, pos);
-  range.collapse(true);
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
 }
 
 const TEMPLATE = `
@@ -123,6 +90,19 @@ export class RepeaterView extends HTMLElement {
     this.reqEditor.addEventListener('scroll', () => {
       this.querySelector('#req-lines').scrollTop = this.reqEditor.scrollTop;
     });
+    this._undoRedo = createUndoRedo({
+      element: this.reqEditor,
+      render: (text, caret) => {
+        const tab = this.currentTab();
+        if (tab) tab.requestText = text;
+        this.reqEditor.textContent = text;
+        this.renderEditor();
+        setCaret(this.reqEditor, caret);
+        this.updateLineNumbers();
+        this.updateTarget();
+        this.scheduleInspectorUpdate();
+      },
+    });
     const target = this.querySelector('#target');
     target.addEventListener('input', () => { this.targetEdited = true; });
     target.addEventListener('focus', () => { this.targetEdited = true; });
@@ -175,6 +155,7 @@ export class RepeaterView extends HTMLElement {
     const tab = this.currentTab();
     this.renderTabs();
     this.reqEditor.textContent = tab.requestText;
+    this._undoRedo.reset(tab.requestText);
     this.refreshEditor();
     this.renderResponse(tab.response);
     this.updateTarget();
@@ -239,6 +220,7 @@ export class RepeaterView extends HTMLElement {
   }
 
   onEditorInput() {
+    this._undoRedo.commit(this.reqEditor.textContent);
     const caret = caretOffset(this.reqEditor);
     const tab = this.currentTab();
     if (tab) tab.requestText = this.reqEditor.textContent;
@@ -463,4 +445,4 @@ function buildRequestWire(flow) {
   return `${flow.method} ${flow.full_url} HTTP/1.1\n${headers}\n\n${flow.request_body || ''}`;
 }
 
-customElements.define('repeater-view', RepeaterView);
+if (!customElements.get('repeater-view')) customElements.define('repeater-view', RepeaterView);

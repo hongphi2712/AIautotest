@@ -1,5 +1,9 @@
-use api_tester_domain::{HttpFlow, HttpMethod, Session};
-use api_tester_ports::{FlowRepository, SessionRepository};
+use api_tester_domain::{
+    HttpFlow, HttpMethod, Session, SitemapAnnotation, WorkflowRun, WorkflowVersion,
+};
+use api_tester_ports::{
+    AnnotationRepository, FlowRepository, SessionRepository, WorkflowRepository,
+};
 use api_tester_storage::SqliteStore;
 
 async fn store_at(path: &std::path::Path) -> SqliteStore {
@@ -93,6 +97,107 @@ async fn workflow_placeholder_tables_exist() {
     assert!(store.table_exists("workflow_nodes").await.unwrap());
     assert!(store.table_exists("workflow_edges").await.unwrap());
     assert!(store.table_exists("workflow_runs").await.unwrap());
+    assert!(store.table_exists("workflow_versions").await.unwrap());
+}
+
+#[tokio::test]
+async fn sitemap_annotations_round_trip_and_delete() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let database = directory.path().join("data.db");
+    let key = "https://api.example.com/api/users";
+
+    {
+        let store = store_at(&database).await;
+        assert!(store.annotations().list_all().await.unwrap().is_empty());
+
+        let annotation = SitemapAnnotation {
+            key: key.to_owned(),
+            comment: Some("vulnerable".to_owned()),
+            color: Some("red".to_owned()),
+            updated_at: chrono::Utc::now(),
+        };
+        store.annotations().upsert(&annotation).await.unwrap();
+
+        let updated = SitemapAnnotation {
+            comment: Some("confirmed".to_owned()),
+            color: Some("orange".to_owned()),
+            ..annotation
+        };
+        store.annotations().upsert(&updated).await.unwrap();
+    }
+
+    let store = store_at(&database).await;
+    let annotations = store.annotations().list_all().await.unwrap();
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0].key, key);
+    assert_eq!(annotations[0].comment.as_deref(), Some("confirmed"));
+    assert_eq!(annotations[0].color.as_deref(), Some("orange"));
+
+    store.annotations().delete(key).await.unwrap();
+    assert!(store.annotations().list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn workflow_versions_and_runs_round_trip() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let database = directory.path().join("data.db");
+
+    let version = WorkflowVersion {
+        name: "Login and fetch orders".to_owned(),
+        base_url: "https://api.example.com".to_owned(),
+        spec_json: r#"{"name":"Login","nodes":[]}"#.to_owned(),
+        ..WorkflowVersion::default()
+    };
+    let version_id = version.id.clone();
+    let run = WorkflowRun {
+        version_id: version_id.clone(),
+        ..WorkflowRun::default()
+    };
+    let run_id = run.run_id.clone();
+
+    {
+        let store = store_at(&database).await;
+        store.workflows().save_version(&version).await.unwrap();
+        store.workflows().save_run(&run).await.unwrap();
+    }
+
+    let store = store_at(&database).await;
+    let loaded_version = store
+        .workflows()
+        .get_version(&version_id)
+        .await
+        .unwrap()
+        .expect("version should exist");
+    assert_eq!(loaded_version, version);
+    assert_eq!(store.workflows().list_versions().await.unwrap().len(), 1);
+
+    store
+        .workflows()
+        .update_run(
+            &run_id,
+            "completed",
+            Some(chrono::Utc::now()),
+            r#"{"a":{"ok":true}}"#,
+        )
+        .await
+        .unwrap();
+    let loaded_run = store
+        .workflows()
+        .get_run(&run_id)
+        .await
+        .unwrap()
+        .expect("run should exist");
+    assert_eq!(loaded_run.status, "completed");
+    assert_eq!(loaded_run.results_json, r#"{"a":{"ok":true}}"#);
+    assert_eq!(
+        store
+            .workflows()
+            .list_runs(&version_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -153,4 +258,22 @@ async fn count_tracks_total_persisted_flows() {
     // Reopening a fresh store over the same file sees the persisted count.
     let reopened = store_at(&directory.path().join("data.db")).await;
     assert_eq!(reopened.flows().count().await.unwrap(), 5);
+}
+
+#[tokio::test]
+async fn clear_all_removes_every_persisted_flow() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let store = store_at(&directory.path().join("data.db")).await;
+
+    let mut flow = HttpFlow::new(HttpMethod::Post, "example.com", "/login");
+    flow.session_id = "session-a".to_owned();
+    store.flows().save(&flow).await.unwrap();
+    let other = HttpFlow::new(HttpMethod::Get, "example.com", "/profile");
+    store.flows().save(&other).await.unwrap();
+    assert_eq!(store.flows().count().await.unwrap(), 2);
+
+    store.flows().clear_all().await.unwrap();
+
+    assert_eq!(store.flows().count().await.unwrap(), 0);
+    assert!(store.flows().get_by_id(&flow.id).await.unwrap().is_none());
 }

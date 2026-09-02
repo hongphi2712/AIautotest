@@ -58,6 +58,10 @@ impl FlowRepository for FlakyRepository {
     async fn list_by_session(&self, session_id: &str) -> Result<Vec<HttpFlow>, PortError> {
         self.inner.list_by_session(session_id).await
     }
+
+    async fn clear_all(&self) -> Result<(), PortError> {
+        self.inner.clear_all().await
+    }
 }
 
 fn writer_with_events(

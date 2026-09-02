@@ -51,6 +51,11 @@ impl HttpClient for ReqwestHttpClient {
             .map_err(|error| PortError::Permanent(error.to_string()))?;
         let mut builder = self.client.request(method, &request.url);
         for (name, value) in &request.headers {
+            // Repeater displays text bodies; do not ask upstream for a
+            // compressed representation that this minimal client cannot decode.
+            if name.eq_ignore_ascii_case("accept-encoding") {
+                continue;
+            }
             builder = builder.header(name, value);
         }
         let response = builder

@@ -2,6 +2,7 @@
 members = [
     "apps/api-tester-cli",
     "apps/api-tester-server",
+    "crates/ai",
     "crates/analysis",
     "crates/application",
     "crates/auth",
@@ -14,19 +15,22 @@ members = [
     "crates/query",
     "crates/reporting",
     "crates/scanner",
+    "crates/security",
     "crates/storage",
     "crates/test-support",
+    "crates/workflow",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 license = "MIT"
 authors = ["API-AutoTester Team"]
 
 [workspace.dependencies]
+api-tester-ai = { path = "crates/ai" }
 api-tester-analysis = { path = "crates/analysis" }
 api-tester-application = { path = "crates/application" }
 api-tester-auth = { path = "crates/auth" }
@@ -39,8 +43,10 @@ api-tester-proxy = { path = "crates/proxy" }
 api-tester-query = { path = "crates/query" }
 api-tester-reporting = { path = "crates/reporting" }
 api-tester-scanner = { path = "crates/scanner" }
+api-tester-security = { path = "crates/security" }
 api-tester-storage = { path = "crates/storage" }
 api-tester-test-support = { path = "crates/test-support" }
+api-tester-workflow = { path = "crates/workflow" }
 
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
@@ -49,6 +55,7 @@ chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 criterion = "0.5"
 flate2 = "1"
+brotli = "7"
 futures-util = "0.3"
 governor = "0.8"
 http = "1"
@@ -63,6 +70,7 @@ rand = "0.8"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+scraper = "0.22"
 rsa = { version = "0.9", features = ["pem"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
@@ -108,4 +116,3 @@ debug = false
 
 [profile.release.package."*"]
 opt-level = 1
-

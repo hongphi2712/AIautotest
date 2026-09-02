@@ -3,7 +3,7 @@ use std::sync::Arc;
 use api_tester_capture::RingBuffer;
 use api_tester_domain::{DomainEvent, HttpFlow};
 use api_tester_events::EventBus;
-use api_tester_ports::{CaptureSink, EventPublisher, FlowRepository, PortError};
+use api_tester_ports::{CaptureSink, EventPublisher, FlowRepository, PortError, SessionRepository};
 use api_tester_storage::SqliteStore;
 use async_trait::async_trait;
 use serde_json::json;
@@ -58,14 +58,40 @@ impl CaptureSink for DashboardSink {
         // Persist first so `flow_detail` can always load the full body.
         if let Some(store) = self.store.lock().await.as_ref() {
             let _ = store.flows().save(&flow).await;
+            // Thorough: bump session flow_count for both orphan and supplied sessions
+            // (supplied path previously left flow_count 0, so dropdown showed 0)
+            if !flow.session_id.trim().is_empty() {
+                let sid = flow.session_id.clone();
+                let store_clone = self.store.clone();
+                tokio::spawn(async move {
+                    if let Some(s) = store_clone.lock().await.as_ref() {
+                        if let Ok(Some(mut sess)) = s.sessions().get_by_id(&sid).await {
+                            sess.flow_count = sess.flow_count.saturating_add(1);
+                            let _ = s.sessions().save(&sess).await;
+                        }
+                    }
+                });
+            }
         }
         self.buffer.push(strip_flow(&flow));
         let _ = self.events.publish(DomainEvent::flow_captured(&flow)).await;
-        if let Ok(text) = serde_json::to_string(&json!({
-            "type": "flow",
-            "flow": FlowSummary::from(&flow),
-        })) {
-            let _ = self.ws_tx.send(text);
+        // FlowSummary::from runs gitleaks CLI + regex analysis over the full
+        // body. Keep this capture hot path responsive by doing that work on
+        // the blocking pool instead of a tokio worker thread.
+        let summary = match tokio::task::spawn_blocking(move || FlowSummary::from(&flow)).await {
+            Ok(summary) => Some(summary),
+            Err(error) => {
+                eprintln!("[dashboard] flow summary task failed: {error}");
+                None
+            }
+        };
+        if let Some(summary) = summary {
+            if let Ok(text) = serde_json::to_string(&json!({
+                "type": "flow",
+                "flow": summary,
+            })) {
+                let _ = self.ws_tx.send(text);
+            }
         }
         Ok(())
     }

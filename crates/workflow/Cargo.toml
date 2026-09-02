@@ -1,0 +1,25 @@
+[package]
+name = "api-tester-workflow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+api-tester-domain.workspace = true
+api-tester-ports.workspace = true
+chrono.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+api-tester-test-support.workspace = true
+
+[lints]
+workspace = true

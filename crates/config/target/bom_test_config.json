@@ -1,0 +1,1 @@
+﻿{"proxy":{"host":"127.0.0.1","port":9999},"buffer":{},"scanner":{},"oast":{},"scope":{},"security":{"max_requests":200,"timeout_secs":15,"concurrency":1},"ai":{},"log_level":"INFO","output_dir":"./output"}

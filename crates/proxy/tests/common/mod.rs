@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
-use api_tester_domain::{HttpFlow, ProxyConfig, ScopeConfig};
+use api_tester_domain::{HttpFlow, MatchRule, ProxyConfig, ScopeConfig};
 use api_tester_ports::{CaptureSink, PortError, SessionRepository};
 use api_tester_proxy::{
     CertProvider, InterceptController, MatchReplaceEngine, ProxyServer, RcgenCertProvider,
@@ -67,14 +67,40 @@ pub async fn start_proxy(
     .await
 }
 
+pub async fn start_proxy_with_rules(
+    config: ProxyConfig,
+    scope_config: ScopeConfig,
+    sink: Arc<VecCaptureSink>,
+    rules: Vec<MatchRule>,
+) -> Arc<ProxyServer> {
+    start_proxy_full(
+        config,
+        scope_config,
+        sink,
+        Arc::new(InterceptController::default()),
+        rules,
+    )
+    .await
+}
+
 pub async fn start_proxy_with_intercept(
     config: ProxyConfig,
     scope_config: ScopeConfig,
     sink: Arc<VecCaptureSink>,
     intercept: Arc<InterceptController>,
 ) -> Arc<ProxyServer> {
-    let scope = Arc::new(ScopeFilter::new(scope_config).unwrap());
-    let match_replace = Arc::new(MatchReplaceEngine::new(vec![]));
+    start_proxy_full(config, scope_config, sink, intercept, Vec::new()).await
+}
+
+async fn start_proxy_full(
+    config: ProxyConfig,
+    scope_config: ScopeConfig,
+    sink: Arc<VecCaptureSink>,
+    intercept: Arc<InterceptController>,
+    rules: Vec<MatchRule>,
+) -> Arc<ProxyServer> {
+    let scope = Arc::new(RwLock::new(ScopeFilter::new(scope_config).unwrap()));
+    let match_replace = Arc::new(MatchReplaceEngine::new(rules));
     let cert_dir = tempfile::tempdir().unwrap();
     let cert: Arc<dyn CertProvider> =
         Arc::new(RcgenCertProvider::new(cert_dir.path().to_path_buf()));

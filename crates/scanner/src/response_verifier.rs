@@ -50,6 +50,22 @@ impl ResponseVerifier {
     }
 
     fn classify(&self, mutation: &Mutation, status: u16, body: &str) -> Option<Severity> {
+        match mutation.payload.skill_name.as_str() {
+            "excessive_data_exposure" | "rsc_hydration_leak" => {
+                let signal = api_tester_analysis::OverfetchingAnalyzer::analyze(body);
+                if signal.is_suspicious {
+                    return Some(Severity::High);
+                }
+            }
+            "secret_leak" | "cwe_debug_exposure" => {
+                let sec = api_tester_analysis::SecretScanner::analyze(body);
+                if sec.is_suspicious {
+                    return Some(Severity::High);
+                }
+            }
+            _ => {}
+        }
+
         let reflected =
             !mutation.payload.value.is_empty() && body.contains(mutation.payload.value.as_str());
         if reflected {
@@ -76,6 +92,7 @@ impl ResponseVerifier {
         None
     }
 }
+
 
 #[cfg(test)]
 mod tests {

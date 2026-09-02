@@ -112,6 +112,8 @@ pub struct HttpFlow {
     pub response_cookie_values: BTreeMap<String, String>,
     #[serde(default)]
     pub content_type: String,
+    #[serde(default)]
+    pub duration_ms: u64,
 }
 
 impl HttpFlow {
@@ -217,6 +219,7 @@ impl Default for HttpFlow {
             response_cookies: Vec::new(),
             response_cookie_values: BTreeMap::new(),
             content_type: String::new(),
+            duration_ms: 0,
         }
     }
 }

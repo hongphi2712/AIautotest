@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -82,7 +83,7 @@ type RelayBody = BoxBody<Bytes, Infallible>;
 
 pub struct ProxyServer {
     config: ProxyConfig,
-    scope: Arc<ScopeFilter>,
+    scope: Arc<RwLock<ScopeFilter>>,
     match_replace: Arc<MatchReplaceEngine>,
     cert: Arc<dyn CertProvider>,
     upstream: Arc<UpstreamClient>,
@@ -90,6 +91,7 @@ pub struct ProxyServer {
     session_repository: Arc<dyn SessionRepository>,
     intercept: Arc<InterceptController>,
     session: Arc<tokio::sync::Mutex<Option<Arc<ActiveSession>>>>,
+    session_id_source: Option<Arc<tokio::sync::Mutex<Option<String>>>>,
     semaphore: Arc<Semaphore>,
     running: AtomicBool,
     accept_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -105,6 +107,7 @@ pub struct ProxyServer {
 #[derive(Clone)]
 struct FlowCaptureCtx {
     timestamp: chrono::DateTime<chrono::Utc>,
+    duration_ms: u64,
     method: HttpMethod,
     host: String,
     ip: String,
@@ -121,6 +124,7 @@ struct FlowCaptureCtx {
 /// paths.
 #[allow(clippy::too_many_arguments)]
 fn build_ctx(
+    start_instant: Instant,
     method: &HttpMethod,
     host: &str,
     ip: &str,
@@ -133,6 +137,7 @@ fn build_ctx(
 ) -> FlowCaptureCtx {
     FlowCaptureCtx {
         timestamp: chrono::Utc::now(),
+        duration_ms: start_instant.elapsed().as_millis() as u64,
         method: method.clone(),
         host: host.to_owned(),
         ip: ip.to_owned(),
@@ -164,6 +169,7 @@ struct TeeBody {
     done: bool,
     sink: Arc<dyn CaptureSink>,
     session: Arc<tokio::sync::Mutex<Option<Arc<ActiveSession>>>>,
+    session_id_source: Option<Arc<tokio::sync::Mutex<Option<String>>>>,
     ctx: Option<FlowCaptureCtx>,
 }
 
@@ -174,6 +180,7 @@ impl TeeBody {
         expected: Option<u64>,
         sink: Arc<dyn CaptureSink>,
         session: Arc<tokio::sync::Mutex<Option<Arc<ActiveSession>>>>,
+        session_id_source: Option<Arc<tokio::sync::Mutex<Option<String>>>>,
         ctx: Option<FlowCaptureCtx>,
     ) -> Self {
         Self {
@@ -184,6 +191,7 @@ impl TeeBody {
             done: false,
             sink,
             session,
+            session_id_source,
             ctx,
         }
     }
@@ -217,29 +225,49 @@ impl TeeBody {
         };
         let sink = self.sink.clone();
         let session = self.session.clone();
+        let session_id_source = self.session_id_source.clone();
         let max = self.max_capture;
         let captured = std::mem::take(&mut self.capture);
-        spawn_capture(session, sink, max, ctx, captured.bytes);
+        spawn_capture(session, session_id_source, sink, max, ctx, captured.bytes);
     }
 }
 
 /// Persists a finished request/response pair via `FlowBuilder` and updates the
 /// session flow count. Shared by the streaming (`TeeBody`) and buffered
 /// (intercepted response) capture paths.
+/// When `session_id_source` is Some, per-flow captures prefer the active
+/// session id from AppState (async lock per flow) with fallback to the
+/// legacy orphan `session` for tests / when no active session.
 fn spawn_capture(
     session: Arc<tokio::sync::Mutex<Option<Arc<ActiveSession>>>>,
+    session_id_source: Option<Arc<tokio::sync::Mutex<Option<String>>>>,
     sink: Arc<dyn CaptureSink>,
     max: usize,
     ctx: FlowCaptureCtx,
     response_body: Vec<u8>,
 ) {
+    let session_clone = session.clone();
+    let sink_clone = sink.clone();
     tokio::spawn(async move {
-        let Some(session) = session.lock().await.as_ref().cloned() else {
-            return;
+        let supplied: Option<String> = if let Some(src) = &session_id_source {
+            src.lock().await.clone()
+        } else {
+            None
         };
-        let builder = FlowBuilder::new(session.id().to_owned(), sink, max);
+        let (session_id, is_supplied) = match supplied {
+            Some(id) if !id.trim().is_empty() => (id, true),
+            _ => {
+                let guard = session_clone.lock().await;
+                let Some(active) = guard.as_ref() else {
+                    return;
+                };
+                (active.id().to_owned(), false)
+            }
+        };
+        let builder = FlowBuilder::new(session_id.clone(), sink_clone, max);
         let parts = FlowParts {
             timestamp: ctx.timestamp,
+            duration_ms: ctx.duration_ms,
             method: ctx.method,
             host: &ctx.host,
             ip: &ctx.ip,
@@ -256,7 +284,8 @@ fn spawn_capture(
             },
         };
         if builder.capture(parts).await.is_ok() {
-            let _ = session.record_flow().await;
+            // flow_count now handled thoroughly in DashboardSink for both orphan and supplied
+            let _ = is_supplied;
         }
     });
 }
@@ -294,7 +323,7 @@ impl ProxyServer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: ProxyConfig,
-        scope: Arc<ScopeFilter>,
+        scope: Arc<RwLock<ScopeFilter>>,
         match_replace: Arc<MatchReplaceEngine>,
         cert: Arc<dyn CertProvider>,
         upstream: Arc<UpstreamClient>,
@@ -312,6 +341,7 @@ impl ProxyServer {
             session_repository,
             intercept: Arc::new(InterceptController::default()),
             session: Arc::new(tokio::sync::Mutex::new(None)),
+            session_id_source: None,
             semaphore: Arc::new(Semaphore::new(max_connections)),
             running: AtomicBool::new(false),
             accept_task: tokio::sync::Mutex::new(None),
@@ -321,6 +351,24 @@ impl ProxyServer {
             on_error: None,
             tunnel_errors: std::sync::Mutex::new(TunnelErrorReporter::new()),
         }
+    }
+
+    /// Supply active-session id from AppState. Per-flow captures prefer this
+    /// id (async lock per flow) with fallback to legacy orphan session.
+    pub fn with_session_id_source(
+        mut self,
+        source: Arc<tokio::sync::Mutex<Option<String>>>,
+    ) -> Self {
+        self.session_id_source = Some(source);
+        self
+    }
+
+    /// Replaces the capture scope without restarting the listener.
+    pub fn replace_scope(&self, scope: ScopeFilter) {
+        *self
+            .scope
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner()) = scope;
     }
 
     /// Registers a callback invoked with the error message whenever a proxied
@@ -346,14 +394,20 @@ impl ProxyServer {
         let listener = TcpListener::bind(&addr).await.map_err(ProxyError::from)?;
         *self.bound_addr.lock().await = Some(listener.local_addr().map_err(ProxyError::from)?);
 
-        let session = ActiveSession::start(
-            self.session_repository.clone(),
-            "capture",
-            format!("{}:{}", self.config.host, self.config.port),
-        )
-        .await
-        .map_err(|error| ProxyError::Runtime(error.to_string()))?;
-        *self.session.lock().await = Some(Arc::new(session));
+        // Strict gate: when supplier is present, don't create orphan capture session
+        let should_create_orphan = self.session_id_source.is_none();
+        if should_create_orphan {
+            let session = ActiveSession::start(
+                self.session_repository.clone(),
+                "capture",
+                format!("{}:{}", self.config.host, self.config.port),
+            )
+            .await
+            .map_err(|error| ProxyError::Runtime(error.to_string()))?;
+            *self.session.lock().await = Some(Arc::new(session));
+        } else {
+            *self.session.lock().await = None;
+        }
 
         self.running.store(true, Ordering::SeqCst);
         let this = self.clone();
@@ -452,7 +506,12 @@ impl ProxyServer {
     ) {
         let (host, port) = parse_connect_target(target);
 
-        if self.scope.should_capture(&host, "/") {
+        let should_capture = self
+            .scope
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .should_capture(&host, "/");
+        if should_capture {
             let client_ip = peer_ip(&socket);
             self.mitm(socket, &host, port, client_ip, shutdown).await;
         } else {
@@ -591,6 +650,7 @@ impl ProxyServer {
         tunnel_host: Option<String>,
         client_ip: &str,
     ) -> Result<Response<RelayBody>, ProxyError> {
+        let start_instant = std::time::Instant::now();
         let (mut scheme, mut host) = match &tunnel_host {
             Some(host) => ("https".to_owned(), host.clone()),
             None => {
@@ -621,7 +681,11 @@ impl ProxyServer {
             return self.serve_crl();
         }
 
-        let capture = self.scope.should_capture(&host, &path);
+        let capture = self
+            .scope
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .should_capture(&host, &path);
 
         // Collect the full request body: truncating here would silently corrupt
         // large uploads forwarded upstream. The captured copy is capped instead
@@ -630,6 +694,30 @@ impl ProxyServer {
 
         let mut request_headers = req.headers().clone();
         let request_body_str = String::from_utf8_lossy(&request_body);
+
+        // Apply `replace_url` rules to the full request URL (scheme://host/path)
+        // before anything downstream (intercept entry, upstream target, captured
+        // flow) observes it. The Host header is synced so HTTP/1.1 stays
+        // consistent with the new authority. An unparseable rewrite keeps the
+        // original URL.
+        let url_before = format!("{scheme}://{host}{path}");
+        let url_after = self.match_replace.apply_to_url(
+            &url_before,
+            &request_headers,
+            &path,
+            Some(&request_body_str),
+        );
+        if url_after != url_before {
+            if let Some((edit_scheme, edit_host, edit_path)) = parse_edited_url(&url_after) {
+                scheme = edit_scheme;
+                host = edit_host;
+                path = edit_path;
+                if let Ok(host_value) = http::HeaderValue::from_str(&host) {
+                    request_headers.insert("host", host_value);
+                }
+            }
+        }
+
         request_headers = self.match_replace.apply_to_request_headers(
             &request_headers,
             &path,
@@ -767,9 +855,11 @@ impl ProxyServer {
             if capture {
                 spawn_capture(
                     self.session.clone(),
+                    self.session_id_source.clone(),
                     self.sink.clone(),
                     self.config.max_body_bytes,
                     build_ctx(
+                        start_instant,
                         &method_from_str(method.as_str()),
                         &host,
                         client_ip,
@@ -798,6 +888,7 @@ impl ProxyServer {
 
         let ctx = if capture {
             Some(build_ctx(
+                start_instant,
                 &method_from_str(method.as_str()),
                 &host,
                 client_ip,
@@ -831,6 +922,7 @@ impl ProxyServer {
                 expected,
                 self.sink.clone(),
                 self.session.clone(),
+                self.session_id_source.clone(),
                 ctx,
             )))
             .map_err(|error| ProxyError::Runtime(error.to_string()))?;

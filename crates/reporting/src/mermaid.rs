@@ -33,10 +33,11 @@ impl MermaidGenerator {
 
         for flow in &sorted {
             let body_summary = summarize_body(flow.request_body.as_deref());
+            let display_path = flow.path.split('?').next().unwrap_or(&flow.path);
             lines.push(format!(
                 "    Client->>API: {} {} {}",
                 flow.method.as_str(),
-                flow.path,
+                display_path,
                 body_summary
             ));
             lines.push(format!("    API-->>Client: {}", flow.response_status));

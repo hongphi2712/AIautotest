@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use api_tester_domain::{DomainEvent, HttpFlow, Session};
+use api_tester_domain::{DomainEvent, HttpFlow, Session, SitemapAnnotation};
 use api_tester_ports::{
-    EventPublisher, FlowRepository, HttpClient, HttpRequest, HttpResponse, PortError,
-    SessionRepository,
+    AnnotationRepository, EventPublisher, FlowRepository, HttpClient, HttpRequest, HttpResponse,
+    PortError, SessionRepository,
 };
 use async_trait::async_trait;
 
@@ -42,6 +42,14 @@ impl FlowRepository for InMemoryFlowRepository {
             .cloned()
             .collect())
     }
+
+    async fn clear_all(&self) -> Result<(), PortError> {
+        self.flows
+            .lock()
+            .map_err(|_| PortError::Permanent("flow repository mutex poisoned".to_owned()))?
+            .clear();
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -66,6 +74,22 @@ impl SessionRepository for InMemorySessionRepository {
             .map_err(|_| PortError::Permanent("session repository mutex poisoned".to_owned()))?
             .get(session_id)
             .cloned())
+    }
+
+    async fn delete(&self, session_id: &str) -> Result<(), PortError> {
+        self.sessions
+            .lock()
+            .map_err(|_| PortError::Permanent("session repository mutex poisoned".to_owned()))?
+            .remove(session_id);
+        Ok(())
+    }
+
+    async fn clear_all(&self) -> Result<(), PortError> {
+        self.sessions
+            .lock()
+            .map_err(|_| PortError::Permanent("session repository mutex poisoned".to_owned()))?
+            .clear();
+        Ok(())
     }
 }
 
@@ -131,5 +155,40 @@ impl HttpClient for MockHttpClient {
             });
         }
         Ok(responses.remove(0))
+    }
+}
+
+/// In-memory `AnnotationRepository` for tests.
+#[derive(Default)]
+pub struct InMemoryAnnotationRepository {
+    annotations: Mutex<BTreeMap<String, SitemapAnnotation>>,
+}
+
+#[async_trait]
+impl AnnotationRepository for InMemoryAnnotationRepository {
+    async fn upsert(&self, annotation: &SitemapAnnotation) -> Result<(), PortError> {
+        self.annotations
+            .lock()
+            .map_err(|_| PortError::Permanent("annotation repository mutex poisoned".to_owned()))?
+            .insert(annotation.key.clone(), annotation.clone());
+        Ok(())
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), PortError> {
+        self.annotations
+            .lock()
+            .map_err(|_| PortError::Permanent("annotation repository mutex poisoned".to_owned()))?
+            .remove(key);
+        Ok(())
+    }
+
+    async fn list_all(&self) -> Result<Vec<SitemapAnnotation>, PortError> {
+        Ok(self
+            .annotations
+            .lock()
+            .map_err(|_| PortError::Permanent("annotation repository mutex poisoned".to_owned()))?
+            .values()
+            .cloned()
+            .collect())
     }
 }

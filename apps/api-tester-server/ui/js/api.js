@@ -17,12 +17,75 @@ export function apiGet(path) {
   return request(path);
 }
 
+export async function apiDelete(path) {
+  const res = await fetch(path, { method: 'DELETE' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
 export function apiPost(path, body) {
   return request(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body == null ? undefined : JSON.stringify(body),
   });
+}
+
+export function apiPut(path, body) {
+  return request(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiDeleteBody(path, body) {
+  const response = await fetch(path, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.json();
+}
+
+// Compatibility bridge for cached Tauri-era modules during the web migration.
+// New code should use apiGet/apiPost directly.
+export function invoke(command, args = {}) {
+  const routes = {
+    app_health: ['/api/health', 'GET'],
+    proxy_status: ['/api/proxy/status', 'GET'],
+    start_proxy: ['/api/proxy/start', 'POST'],
+    stop_proxy: ['/api/proxy/stop', 'POST'],
+    list_flows: ['/api/flows', 'GET'],
+    flow_detail: ['/api/flows/' + encodeURIComponent(args.flowId || args.id || ''), 'GET'],
+    cert_info: ['/api/cert/info', 'GET'],
+    install_ca: ['/api/cert/install', 'POST'],
+    open_browser: ['/api/browser/open', 'POST'],
+    repeater_send: ['/api/repeater/send', 'POST'],
+    intercept_status: ['/api/intercept/status', 'GET'],
+    intercept_list: ['/api/intercept/list', 'GET'],
+    intercept_set_enabled: ['/api/intercept/enabled', 'POST'],
+    intercept_set_scopes: ['/api/intercept/scopes', 'POST'],
+    intercept_forward: ['/api/intercept/' + encodeURIComponent(args.id || '') + '/forward', 'POST'],
+    intercept_drop: ['/api/intercept/' + encodeURIComponent(args.id || '') + '/drop', 'POST'],
+  };
+  const route = routes[command];
+  if (!route) return Promise.reject(new Error('Unsupported API command: ' + command));
+  const body = command === 'intercept_set_enabled'
+    ? { enabled: args.enabled }
+    : command === 'intercept_set_scopes'
+      ? { intercept_requests: args.interceptRequests, intercept_responses: args.interceptResponses }
+      : command === 'repeater_send'
+        ? args.request
+        : command === 'intercept_forward'
+          ? { edit: args.edit ?? null }
+          : command === 'list_flows'
+            ? args.filters
+              ? { }
+              : undefined
+            : undefined;
+  return route[1] === 'GET' ? apiGet(route[0]) : apiPost(route[0], body);
 }
 
 export function formatStatus(code) { return code === 0 ? 'N/A' : String(code); }

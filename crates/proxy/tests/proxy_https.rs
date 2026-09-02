@@ -1,6 +1,6 @@
 mod common;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use api_tester_domain::{ProxyConfig, ScopeConfig};
 use api_tester_ports::SessionRepository;
@@ -99,7 +99,7 @@ async fn https_mitm_cert_is_signed_by_generated_ca() {
         port: 0,
         ..ProxyConfig::default()
     };
-    let scope = Arc::new(ScopeFilter::new(scope_config).unwrap());
+    let scope = Arc::new(RwLock::new(ScopeFilter::new(scope_config).unwrap()));
     let match_replace = Arc::new(MatchReplaceEngine::new(vec![]));
     let upstream_client = Arc::new(UpstreamClient::new(&config).unwrap());
     let session_repository: Arc<dyn SessionRepository> =

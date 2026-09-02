@@ -46,4 +46,4 @@ export class InspectorPanel extends HTMLElement {
   }
 }
 
-customElements.define('inspector-panel', InspectorPanel);
+if (!customElements.get('inspector-panel')) customElements.define('inspector-panel', InspectorPanel);

@@ -1,6 +1,6 @@
-use std::io::Read;
-
+use brotli::Decompressor;
 use flate2::read::{GzDecoder, ZlibDecoder};
+use std::io::Read;
 
 use super::parse::Header;
 
@@ -21,6 +21,7 @@ pub fn content_encoding(headers: &[Header]) -> String {
 /// decompression bomb can never allocate unbounded memory.
 pub fn decode_body(body: &[u8], encoding: &str, max: usize) -> Vec<u8> {
     let mut decoded = match encoding {
+        "br" => inflate_brotli(body, max).unwrap_or_else(|| body.to_vec()),
         "gzip" => inflate_gzip(body, max).unwrap_or_else(|| body.to_vec()),
         "deflate" => inflate_zlib(body, max).unwrap_or_else(|| body.to_vec()),
         _ => body.to_vec(),
@@ -33,6 +34,13 @@ pub fn decode_body(body: &[u8], encoding: &str, max: usize) -> Vec<u8> {
 
 fn inflate_gzip(body: &[u8], max: usize) -> Option<Vec<u8>> {
     let mut decoder = GzDecoder::new(body).take(max as u64 + 1);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).ok()?;
+    Some(out)
+}
+
+fn inflate_brotli(body: &[u8], max: usize) -> Option<Vec<u8>> {
+    let mut decoder = Decompressor::new(body, max as usize + 1).take(max as u64 + 1);
     let mut out = Vec::new();
     decoder.read_to_end(&mut out).ok()?;
     Some(out)
@@ -61,6 +69,17 @@ mod tests {
         let decoded = decode_body(&compressed, "gzip", 1024);
 
         assert_eq!(decoded, b"hello world");
+    }
+
+    #[test]
+    fn decodes_brotli() {
+        let mut compressed = Vec::new();
+        {
+            let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 9, 22);
+            writer.write_all(b"hello brotli").unwrap();
+        }
+        let decoded = decode_body(&compressed, "br", 1024);
+        assert_eq!(decoded, b"hello brotli");
     }
 
     #[test]

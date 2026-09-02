@@ -41,7 +41,10 @@ enum CompiledAction {
         pattern: Option<Regex>,
         replacement: String,
     },
-    Noop,
+    ReplaceUrl {
+        pattern: Option<Regex>,
+        replacement: String,
+    },
 }
 
 impl CompiledCondition {
@@ -160,6 +163,37 @@ impl MatchReplaceEngine {
         }
         result
     }
+
+    /// Rewrites a request URL (`scheme://host/path`) by applying matching
+    /// request-direction `replace_url` rules. Rules with a response direction
+    /// are ignored (a response has no URL to rewrite). The pattern is matched
+    /// against the full absolute URL, so a rule can change the scheme, host,
+    /// port, path, or query string.
+    pub fn apply_to_url(
+        &self,
+        url: &str,
+        headers: &HeaderMap,
+        path: &str,
+        body: Option<&str>,
+    ) -> String {
+        let mut result = url.to_owned();
+        for rule in &self.compiled {
+            if rule.direction != RuleDirection::Request {
+                continue;
+            }
+            if !rule.condition.matches(headers, path, body) {
+                continue;
+            }
+            if let CompiledAction::ReplaceUrl {
+                pattern: Some(re),
+                replacement,
+            } = &rule.action
+            {
+                result = re.replace_all(&result, replacement.as_str()).into_owned();
+            }
+        }
+        result
+    }
 }
 
 fn compile_rule(rule: &MatchRule) -> CompiledRule {
@@ -204,7 +238,10 @@ fn compile_rule(rule: &MatchRule) -> CompiledRule {
             pattern: compile_optional(&rule.action.pattern),
             replacement: rule.action.replacement.clone().unwrap_or_default(),
         },
-        ReplaceActionType::ReplaceUrl => CompiledAction::Noop,
+        ReplaceActionType::ReplaceUrl => CompiledAction::ReplaceUrl {
+            pattern: compile_optional(&rule.action.pattern),
+            replacement: rule.action.replacement.clone().unwrap_or_default(),
+        },
     };
     CompiledRule {
         direction: rule.direction.clone(),
@@ -521,5 +558,168 @@ mod tests {
 
         let out = engine.apply_to_request_headers(&HeaderMap::new(), "/", None);
         assert!(!out.contains_key("X-Resp"));
+    }
+
+    fn url_rule(
+        name: &str,
+        direction: RuleDirection,
+        condition: MatchCondition,
+        pattern: Option<&str>,
+        replacement: &str,
+    ) -> MatchRule {
+        MatchRule {
+            name: name.to_owned(),
+            direction,
+            r#match: condition,
+            action: ReplaceAction {
+                kind: ReplaceActionType::ReplaceUrl,
+                header: None,
+                value: None,
+                pattern: pattern.map(str::to_owned),
+                replacement: Some(replacement.to_owned()),
+            },
+        }
+    }
+
+    #[test]
+    fn replace_url_rewrites_full_url() {
+        let rule = url_rule(
+            "move",
+            RuleDirection::Request,
+            MatchCondition::default(),
+            Some(r"http://old\.example\.com:8080/"),
+            "https://new.example.com/",
+        );
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let out = engine.apply_to_url(
+            "http://old.example.com:8080/api/orders?q=1",
+            &HeaderMap::new(),
+            "/api/orders",
+            None,
+        );
+
+        assert_eq!(out, "https://new.example.com/api/orders?q=1");
+    }
+
+    #[test]
+    fn replace_url_path_pattern_condition_gates_rewrite() {
+        let rule = url_rule(
+            "admin_only",
+            RuleDirection::Request,
+            MatchCondition {
+                kind: MatchConditionType::PathPattern,
+                header: None,
+                pattern: Some(r"/admin/.*".to_owned()),
+            },
+            Some(r"/admin/"),
+            "/api/v2/admin/",
+        );
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let matched = engine.apply_to_url(
+            "http://example.com/admin/users",
+            &HeaderMap::new(),
+            "/admin/users",
+            None,
+        );
+        assert_eq!(matched, "http://example.com/api/v2/admin/users");
+
+        let untouched = engine.apply_to_url(
+            "http://example.com/public",
+            &HeaderMap::new(),
+            "/public",
+            None,
+        );
+        assert_eq!(untouched, "http://example.com/public");
+    }
+
+    #[test]
+    fn replace_url_ignores_response_direction() {
+        let rule = url_rule(
+            "response_only",
+            RuleDirection::Response,
+            MatchCondition::default(),
+            Some(r"example\.com"),
+            "elsewhere.com",
+        );
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let out = engine.apply_to_url("http://example.com/", &HeaderMap::new(), "/", None);
+
+        assert_eq!(out, "http://example.com/");
+    }
+
+    #[test]
+    fn replace_url_supports_capture_groups() {
+        let rule = url_rule(
+            "rewrite_path",
+            RuleDirection::Request,
+            MatchCondition::default(),
+            Some(r"http://example\.com/([^?]+)"),
+            "http://mirror.example.com/api/$1",
+        );
+        let engine = MatchReplaceEngine::new(vec![rule]);
+
+        let out = engine.apply_to_url(
+            "http://example.com/v1/resource?id=7",
+            &HeaderMap::new(),
+            "/v1/resource",
+            None,
+        );
+
+        assert_eq!(out, "http://mirror.example.com/api/v1/resource?id=7");
+    }
+
+    #[test]
+    fn replace_url_no_op_when_pattern_absent_or_invalid() {
+        let missing = url_rule(
+            "missing_pattern",
+            RuleDirection::Request,
+            MatchCondition::default(),
+            None,
+            "http://other.example.com/",
+        );
+        let invalid = url_rule(
+            "invalid_pattern",
+            RuleDirection::Request,
+            MatchCondition::default(),
+            Some("("),
+            "http://other.example.com/",
+        );
+        let engine = MatchReplaceEngine::new(vec![missing, invalid]);
+
+        let out = engine.apply_to_url("http://example.com/", &HeaderMap::new(), "/", None);
+
+        assert_eq!(out, "http://example.com/");
+    }
+
+    #[test]
+    fn replace_url_multiple_rules_apply_in_order() {
+        let engine = MatchReplaceEngine::new(vec![
+            url_rule(
+                "switch_host",
+                RuleDirection::Request,
+                MatchCondition::default(),
+                Some(r"^http://example\.com"),
+                "http://mirror.example.com",
+            ),
+            url_rule(
+                "prefix_path",
+                RuleDirection::Request,
+                MatchCondition::default(),
+                Some(r"http://mirror\.example\.com/"),
+                "http://mirror.example.com/api/",
+            ),
+        ]);
+
+        let out = engine.apply_to_url(
+            "http://example.com/orders",
+            &HeaderMap::new(),
+            "/orders",
+            None,
+        );
+
+        assert_eq!(out, "http://mirror.example.com/api/orders");
     }
 }

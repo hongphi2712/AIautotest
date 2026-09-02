@@ -32,7 +32,10 @@ impl ConfigLoader {
                     path: path.display().to_string(),
                     source,
                 })?;
-                serde_json::from_str(&contents)?
+                // Strip UTF-8 BOM (EF BB BF) if present — editors on Windows
+                // may emit BOM which breaks serde_json parsing.
+                let contents = contents.strip_prefix('\u{feff}').unwrap_or(&contents);
+                serde_json::from_str(contents)?
             }
             _ => AppConfig::default(),
         };
@@ -71,6 +74,14 @@ impl ConfigLoader {
         }
         if let Some(level) = std::env::var_os("API_TESTER_LOG_LEVEL") {
             config.log_level = level.to_string_lossy().into_owned();
+        }
+        if let Ok(key) = std::env::var("DEEPSEEK_API_KEY") {
+            if !key.trim().is_empty() {
+                config.ai.api_key = Some(key.trim().to_owned());
+            }
+        }
+        if let Some(model) = std::env::var_os("API_TESTER_AI_MODEL") {
+            config.ai.model = model.to_string_lossy().into_owned();
         }
         Ok(())
     }
@@ -122,6 +133,42 @@ mod tests {
         config.validate().unwrap();
         assert_eq!(config.proxy.port, 8080);
         assert_eq!(config.scanner.max_concurrent_requests, 50);
+        assert_eq!(config.security.max_requests, 200);
+        assert_eq!(config.security.timeout_secs, 15);
+        assert_eq!(config.security.concurrency, 1);
+    }
+
+    #[test]
+    fn security_config_defaults_are_valid() {
+        let config = AppConfig::default();
+        config.validate().unwrap();
+        assert_eq!(config.security.max_requests, 200);
+        assert_eq!(config.security.timeout_secs, 15);
+        assert_eq!(config.security.retry_limit, 1);
+        assert_eq!(config.security.concurrency, 1);
+    }
+
+    #[test]
+    fn security_max_requests_zero_is_rejected() {
+        let mut config = AppConfig::default();
+        config.security.max_requests = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn security_timeout_zero_is_rejected() {
+        let mut config = AppConfig::default();
+        config.security.timeout_secs = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn security_concurrency_out_of_range_is_rejected() {
+        let mut config = AppConfig::default();
+        config.security.concurrency = 0;
+        assert!(config.validate().is_err());
+        config.security.concurrency = 5;
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -130,5 +177,20 @@ mod tests {
         config.proxy.port = 0;
 
         assert!(ConfigLoader::save(&config, std::path::Path::new("target/invalid.json")).is_err());
+    }
+
+    #[test]
+    fn config_load_strips_utf8_bom() {
+        let dir = std::path::Path::new("target");
+        let _ = std::fs::create_dir_all(dir);
+        let path = dir.join("bom_test_config.json");
+        // Write config with BOM prefix
+        let mut bom_content = vec![0xEF, 0xBB, 0xBF]; // UTF-8 BOM
+        let json = r#"{"proxy":{"host":"127.0.0.1","port":9999},"buffer":{},"scanner":{},"oast":{},"scope":{},"security":{"max_requests":200,"timeout_secs":15,"concurrency":1},"ai":{},"log_level":"INFO","output_dir":"./output"}"#;
+        bom_content.extend_from_slice(json.as_bytes());
+        std::fs::write(&path, &bom_content).unwrap();
+
+        let config = ConfigLoader::load(Some(&path)).unwrap();
+        assert_eq!(config.proxy.port, 9999);
     }
 }

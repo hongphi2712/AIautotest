@@ -1,6 +1,6 @@
 import {
   apiGet, apiPost, formatTime, colorStatus, toHex, formatHeaders, showError, openBrowser,
-  buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson,
+  buildMessage, contentTypeFromHeaders, isJsonContentType, highlightJson, parseHttpRequest,
   parseQueryParams, parseBodyParams, parseCookies,
 } from '../api.js';
 import './message-viewer.js';
@@ -11,6 +11,7 @@ const TEMPLATE = `
       <button class="btn intercept-on inactive" id="intercept-toggle">Intercept off</button>
       <button class="btn forward" id="intercept-forward">Forward</button>
       <button class="btn drop" id="intercept-drop">Drop</button>
+      <button class="btn" id="intercept-clear">Clear all</button>
     </div>
     <div class="intercept-right">
       <span class="request-info" id="intercept-request-info">No intercepted request</span>
@@ -18,7 +19,7 @@ const TEMPLATE = `
     </div>
   </div>
   <div id="intercept-warning" class="intercept-warning" style="display:none">Intercept is ON: requests/responses pause until you Forward or Drop them.</div>
-  <div class="table-scroll" id="intercept-scroll" style="flex:1;min-height:180px">
+  <div class="table-scroll" id="intercept-scroll" style="flex:none;max-height:32vh;min-height:96px">
     <table class="flows intercept-flows">
       <thead><tr>
         <th class="col-num">#</th><th class="col-time">Time</th><th class="col-type">Type</th><th class="col-direction">Direction</th><th class="col-method">Method</th><th class="col-url">URL</th><th class="col-status">Status</th><th class="col-length">Length</th>
@@ -41,11 +42,10 @@ export class InterceptView extends HTMLElement {
     this.querySelector('#intercept-toggle').addEventListener('click', () => this.toggleIntercept());
     this.querySelector('#intercept-forward').addEventListener('click', () => this.forwardRequest());
     this.querySelector('#intercept-drop').addEventListener('click', () => this.dropRequest());
+    this.querySelector('#intercept-clear').addEventListener('click', () => this.clearAll());
     this.querySelector('#intercept-browser').addEventListener('click', () => openBrowser());
     this.viewer.addEventListener('viewer-action', (event) => {
-      if (event.detail === 'edit') this.showEditPane();
-      else if (event.detail === 'apply') this.applyInterceptEdit();
-      else if (event.detail === 'cancel') this.hideEditPane();
+      if (event.detail === 'apply') this.applyInterceptEdit();
     });
     this.onWsIntercept = () => {
       if (this.interceptEnabled) this.refreshIntercept();
@@ -90,6 +90,7 @@ export class InterceptView extends HTMLElement {
       this.interceptEntries = [];
       this.selectedInterceptId = null;
       this.renderIntercepted();
+      this.showEmptyState();
     }
   }
 
@@ -143,6 +144,7 @@ export class InterceptView extends HTMLElement {
     this.interceptEntries = this.interceptEntries.filter((e) => e.id !== entry.id);
     if (this.selectedInterceptId === entry.id) this.selectedInterceptId = null;
     this.renderIntercepted();
+    await this.loadSelectedOrEmpty();
   }
 
   async dropRequest() {
@@ -157,37 +159,30 @@ export class InterceptView extends HTMLElement {
     this.interceptEntries = this.interceptEntries.filter((e) => e.id !== entry.id);
     if (this.selectedInterceptId === entry.id) this.selectedInterceptId = null;
     this.renderIntercepted();
+    await this.loadSelectedOrEmpty();
+  }
+
+  async clearAll() {
+    if (!window.confirm('Giải phóng toàn bộ item đang giữ trong Intercept?')) return;
+    try {
+      await apiPost('/api/intercept/clear');
+    } catch (error) {
+      showError('Clear all: ' + error);
+      return;
+    }
+    this.interceptEntries = [];
+    this.selectedInterceptId = null;
+    this._interceptFp = null;
+    this.renderIntercepted();
+    this.showEmptyState();
   }
 
   async applyInterceptEdit() {
     const entry = this.selectedInterceptEntry();
     if (!entry) return;
-    const q = (role) => this.viewer.querySelector('[data-role="' + role + '"]');
-    let headers = entry.headers;
-    try {
-      const parsed = JSON.parse(q('edit-headers').value || '[]');
-      if (Array.isArray(parsed)) {
-        headers = parsed.map((h) => ({ name: String(h.name || ''), value: String(h.value || '') }));
-      } else if (parsed && typeof parsed === 'object') {
-        headers = Object.entries(parsed).map(([name, value]) => ({ name, value: String(value) }));
-      }
-    } catch (error) {
-      showError('Headers must be valid JSON: ' + error);
-      return;
-    }
-    let status = null;
-    if (entry.kind === 'response') {
-      const parsed = parseInt(q('edit-status').value, 10);
-      status = Number.isNaN(parsed) ? entry.status : parsed;
-    }
-    const edit = {
-      method: q('edit-method').value,
-      url: q('edit-url').value,
-      status,
-      reason: entry.reason,
-      headers,
-      body: q('edit-body').value,
-    };
+    const edit = entry.kind === 'response'
+      ? responseEditFromWire(this.viewer.editWire(), entry)
+      : requestEditFromWire(this.viewer.editWire(), entry);
     try {
       await apiPost('/api/intercept/' + entry.id + '/forward', { edit });
     } catch (error) {
@@ -197,6 +192,34 @@ export class InterceptView extends HTMLElement {
     this.interceptEntries = this.interceptEntries.filter((e) => e.id !== entry.id);
     if (this.selectedInterceptId === entry.id) this.selectedInterceptId = null;
     this.renderIntercepted();
+    await this.loadSelectedOrEmpty();
+  }
+
+  /// Reloads the first remaining held item into the editor, or clears it when
+  /// the queue is empty. Called after an item is forwarded/dropped.
+  async loadSelectedOrEmpty() {
+    const entry = this.selectedInterceptEntry();
+    if (entry) {
+      await this.showInterceptDetail(entry.id);
+    } else {
+      this.showEmptyState();
+    }
+  }
+
+  showEmptyState() {
+    this.selectedInterceptId = null;
+    this.querySelector('#intercept-request-info').textContent = 'No intercepted request';
+    this.viewer.setEditContent({ title: 'No intercepted request', wire: '', kind: 'request' });
+    this.viewer.data = {
+      requestRaw: '',
+      responseRaw: '',
+      requestPretty: '',
+      responsePretty: '',
+      requestHex: '',
+      responseHex: '',
+      responseRender: '',
+      inspectorSections: [],
+    };
   }
 
   renderIntercepted() {
@@ -209,6 +232,7 @@ export class InterceptView extends HTMLElement {
     this.tbody.innerHTML = '';
     if (!this.interceptEntries.length) {
       info.textContent = 'No intercepted request';
+      this.showEmptyState();
       return;
     }
     info.textContent = this.interceptEntries.length + ' item(s) held';
@@ -235,6 +259,7 @@ export class InterceptView extends HTMLElement {
     if (!f) {
       // Entry already forwarded/dropped since the last poll.
       this.selectedInterceptId = null;
+      this.showEmptyState();
       return;
     }
     const requestInfo = this.querySelector('#intercept-request-info');
@@ -293,23 +318,74 @@ export class InterceptView extends HTMLElement {
       inspectorSections: sections,
     };
 
-    const q = (role) => this.viewer.querySelector('[data-role="' + role + '"]');
-    q('edit-method').value = f.method;
-    q('edit-url').value = f.url;
-    q('edit-status-row').style.display = f.kind === 'response' ? '' : 'none';
-    q('edit-status').value = f.status != null ? f.status : '';
-    q('edit-headers').value = JSON.stringify(f.headers, null, 2);
-    q('edit-body').value = f.body || '';
-    this.hideEditPane();
-  }
-
-  showEditPane() {
-    this.viewer.editOverlay.classList.add('active');
-  }
-
-  hideEditPane() {
-    this.viewer.editOverlay.classList.remove('active');
+    this.viewer.setEditContent({
+      title: f.kind === 'response' ? 'Edit response' : 'Edit request',
+      wire: f.kind === 'response'
+        ? `HTTP/1.1 ${f.status || ''}${f.reason ? ' ' + f.reason : ''}\n${headers}\n\n${f.body || ''}`
+        : `${f.method || 'GET'} ${f.url} HTTP/1.1\n${headers}\n\n${f.body || ''}`,
+      kind: f.kind,
+    });
   }
 }
 
-customElements.define('intercept-view', InterceptView);
+/// Converts the user-edited raw request text back into an `InterceptEdit`.
+/// Keeps the original scheme/host when the request target is origin-form so
+/// https requests do not silently downgrade to http after an edit.
+function requestEditFromWire(wire, entry) {
+  const parsed = parseHttpRequest(wire);
+  const normalized = String(wire || '').replace(/\r\n/g, '\n');
+  const startLine = normalized.split('\n').find((line) => line.trim()) || '';
+  const target = startLine.trim().split(/\s+/)[1] || '';
+  let url = parsed.url;
+  if (!/^https?:\/\//i.test(target)) {
+    let scheme = 'http';
+    let host = '';
+    try { scheme = new URL(entry.url).protocol.replace(':', ''); } catch {}
+    try { host = new URL(entry.url).host; } catch {}
+    const hostHeader = parsed.headers.find((h) => h.name.toLowerCase() === 'host');
+    if (hostHeader) host = hostHeader.value;
+    if (!host) host = 'example.com';
+    url = scheme + '://' + host + parsed.path;
+  }
+  return {
+    method: parsed.method,
+    url,
+    status: null,
+    reason: null,
+    headers: parsed.headers.map((h) => ({ name: h.name, value: h.value })),
+    body: parsed.body,
+  };
+}
+
+/// Converts the user-edited raw response text back into an `InterceptEdit`.
+/// `method`/`url` are not used for responses but are required by the API shape.
+function responseEditFromWire(wire, entry) {
+  const normalized = String(wire || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let start = 0;
+  while (start < lines.length && !lines[start].trim()) start++;
+  const statusMatch = (lines[start] || '').trim().match(/^HTTP\/\S+\s+(\d{3})(?:\s+(.*))?$/i);
+  let status = entry.status;
+  let reason = entry.reason;
+  if (statusMatch) {
+    status = parseInt(statusMatch[1], 10);
+    reason = statusMatch[2] || null;
+  }
+  const headers = [];
+  let j = start + 1;
+  while (j < lines.length && lines[j].trim() !== '') {
+    const idx = lines[j].indexOf(':');
+    if (idx > 0) headers.push({ name: lines[j].slice(0, idx).trim(), value: lines[j].slice(idx + 1).trim() });
+    j++;
+  }
+  return {
+    method: entry.method,
+    url: entry.url,
+    status,
+    reason,
+    headers,
+    body: lines.slice(j + 1).join('\n'),
+  };
+}
+
+if (!customElements.get('intercept-view')) customElements.define('intercept-view', InterceptView);

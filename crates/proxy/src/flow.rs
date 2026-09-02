@@ -19,6 +19,7 @@ pub struct FlowBuilder {
 
 pub struct FlowParts<'a> {
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub duration_ms: u64,
     pub method: HttpMethod,
     pub host: &'a str,
     pub ip: &'a str,
@@ -68,6 +69,7 @@ impl FlowBuilder {
             id: default_flow_id(),
             session_id: self.session_id.clone(),
             timestamp: parts.timestamp,
+            duration_ms: parts.duration_ms,
             method: parts.method,
             host: parts.host.to_owned(),
             ip: parts.ip.to_owned(),
@@ -99,7 +101,19 @@ fn default_flow_id() -> String {
 fn decoded_to_string(decoded: &[u8]) -> String {
     match String::from_utf8(decoded.to_vec()) {
         Ok(text) => text,
-        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+        Err(_) => decoded
+            .chunks(16)
+            .enumerate()
+            .map(|(offset, chunk)| {
+                let bytes = chunk
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{:08x}  {bytes}", offset * 16)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
     }
 }
 

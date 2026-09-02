@@ -1,5 +1,5 @@
 import { apiGet, showError } from './api.js';
-import { setProxyStatus, setLiveFlowCount } from './store.js';
+import { setProxyStatus, setLiveFlowCount, setSession, setSessions, getActiveSession } from './store.js';
 
 function showView(name) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
@@ -21,6 +21,17 @@ async function refreshHealth() {
     const flows = health.flows || 0;
     const sbFlows = document.getElementById('sb-flows');
     if (sbFlows) sbFlows.textContent = flows + ' captured';
+    const sbSession = document.getElementById('sb-session');
+    if (sbSession) {
+      const session = getActiveSession();
+      if (session) {
+        sbSession.textContent = 'Session: ' + (session.name || session.id.slice(0, 8)) + ' (' + (session.flow_count || 0) + ')';
+        sbSession.className = 'ok';
+      } else {
+        sbSession.textContent = 'Session: none';
+        sbSession.className = 'muted';
+      }
+    }
     setLiveFlowCount(flows);
     window.dispatchEvent(new CustomEvent('app:health', { detail: { flows, last_error: health.last_error } }));
     if (health.last_error) {
@@ -35,6 +46,7 @@ async function refreshProxyStatus() {
   try {
     const status = await apiGet('/api/proxy/status');
     setProxyStatus(status.running, status.address || '');
+    setSession(status.session_id || null);
     const pill = document.getElementById('proxy-pill');
     if (pill) pill.classList.toggle('running', status.running);
     const pillText = document.getElementById('proxy-pill-text');
@@ -48,6 +60,16 @@ async function refreshProxyStatus() {
   } catch (error) {
     showError('Cannot reach backend: ' + error);
     return null;
+  }
+}
+
+
+async function fetchSessions() {
+  try {
+    const sessions = await apiGet('/api/sessions');
+    setSessions(sessions || []);
+  } catch {
+    setSessions([]);
   }
 }
 
@@ -66,7 +88,7 @@ export function initShell() {
   });
   window.addEventListener('app:error', (event) => showBanner(event.detail));
   window.addEventListener('app:navigate', (event) => showView(event.detail.view));
-  window.addEventListener('app:refresh-proxy', () => refreshProxyStatus());
+  window.addEventListener('app:refresh-proxy', () => { refreshProxyStatus(); fetchSessions(); });
   window.addEventListener('app:ws-proxy', (event) => {
     const running = event.detail && event.detail.running;
     const address = (event.detail && event.detail.address) || '';
@@ -82,6 +104,7 @@ export function initShell() {
   });
 
   refreshProxyStatus();
+  fetchSessions();
   refreshHealth();
   setInterval(() => { refreshHealth(); }, 2000);
 }

@@ -73,7 +73,9 @@ async fn setup_proxy(tls_upstream: bool) -> (std::net::SocketAddr, u16, String, 
         port: 0,
         ..ProxyConfig::default()
     };
-    let scope = Arc::new(ScopeFilter::new(ScopeConfig::default()).unwrap());
+    let scope = Arc::new(std::sync::RwLock::new(
+        ScopeFilter::new(ScopeConfig::default()).unwrap(),
+    ));
     let match_replace = Arc::new(MatchReplaceEngine::new(vec![]));
     let cert_dir = tempfile::tempdir().unwrap();
     let cert: Arc<dyn CertProvider> =

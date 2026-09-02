@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use api_tester_domain::{ProxyConfig, ScopeConfig};
 use common::{
-    MockHttpUpstream, VecCaptureSink, send_plain, send_plain_with_body, start_proxy, wait_for_flows,
+    MockHttpUpstream, VecCaptureSink, send_plain, send_plain_with_body, start_proxy,
+    start_proxy_with_rules, wait_for_flows,
 };
 use tokio::io::AsyncWriteExt;
 
@@ -255,5 +256,86 @@ async fn large_request_body_is_forwarded_in_full_but_capture_is_capped() {
     assert!(
         flow.request_body.as_deref().map(str::len).unwrap_or(0) <= 100,
         "captured request body must be capped at max_body_bytes"
+    );
+}
+
+#[tokio::test]
+async fn replace_url_rewrites_target_before_forwarding() {
+    use api_tester_domain::{
+        MatchCondition, MatchConditionType, MatchRule, ReplaceAction, ReplaceActionType,
+        RuleDirection,
+    };
+
+    let original = MockHttpUpstream::start().await;
+    let rewritten = MockHttpUpstream::start().await;
+    let sink = Arc::new(VecCaptureSink::default());
+
+    let original_target = format!("127.0.0.1:{}", original.port);
+    let rewritten_target = format!("127.0.0.1:{}", rewritten.port);
+    let rule = MatchRule {
+        name: "move_to_rewritten".to_owned(),
+        direction: RuleDirection::Request,
+        r#match: MatchCondition {
+            kind: MatchConditionType::PathPattern,
+            header: None,
+            pattern: Some(r"/old/.*".to_owned()),
+        },
+        action: ReplaceAction {
+            kind: ReplaceActionType::ReplaceUrl,
+            header: None,
+            value: None,
+            pattern: Some(format!(r"http://{original_target}/old/")),
+            replacement: Some(format!("http://{rewritten_target}/new/")),
+        },
+    };
+
+    let proxy = start_proxy_with_rules(
+        ProxyConfig {
+            port: 0,
+            ..ProxyConfig::default()
+        },
+        ScopeConfig::default(),
+        sink.clone(),
+        vec![rule],
+    )
+    .await;
+    let proxy_addr = proxy.local_addr().await.unwrap();
+
+    let response = send_plain(proxy_addr, &original_target, "GET", "/old/orders").await;
+
+    assert!(response.contains("200 OK"), "got: {response}");
+
+    // The rewritten upstream must receive the request with the new path and
+    // the synced Host header; the original upstream must see nothing.
+    let received = rewritten.received.lock().unwrap().clone();
+    assert_eq!(
+        received.len(),
+        1,
+        "rewritten upstream must get the request: {received:?}"
+    );
+    assert!(
+        received[0].contains("GET /new/orders HTTP/1.1"),
+        "expected rewritten path, got: {}",
+        received[0]
+    );
+    assert!(
+        received[0]
+            .to_lowercase()
+            .contains(&format!("host: {rewritten_target}")),
+        "expected synced Host header, got: {}",
+        received[0]
+    );
+    assert!(
+        original.received.lock().unwrap().is_empty(),
+        "original upstream must not receive any request"
+    );
+
+    // The captured flow reflects the rewritten URL.
+    let flows = wait_for_flows(&sink, 1).await;
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0].path, "/new/orders");
+    assert_eq!(
+        flows[0].full_url,
+        format!("http://{rewritten_target}/new/orders")
     );
 }

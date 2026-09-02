@@ -1,0 +1,23 @@
+[package]
+name = "api-tester-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+api-tester-analysis.workspace = true
+api-tester-ports.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+
+[dev-dependencies]
+api-tester-test-support.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true

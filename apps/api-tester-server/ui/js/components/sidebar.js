@@ -71,4 +71,4 @@ export class TaskSidebar extends HTMLElement {
   }
 }
 
-customElements.define('task-sidebar', TaskSidebar);
+if (!customElements.get('task-sidebar')) customElements.define('task-sidebar', TaskSidebar);

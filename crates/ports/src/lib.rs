@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
-pub use api_tester_domain::{DomainEvent, HttpFlow, ScanJob, Session};
+pub use api_tester_domain::{
+    DomainEvent, HttpFlow, ScanJob, SecurityPlan, SecurityRun, Session, SitemapAnnotation,
+    WorkflowRun, WorkflowVersion,
+};
 
 #[derive(Debug, Error, Clone)]
 pub enum PortError {
@@ -18,6 +21,8 @@ pub trait FlowRepository: Send + Sync {
     async fn save(&self, flow: &HttpFlow) -> Result<(), PortError>;
     async fn get_by_id(&self, flow_id: &str) -> Result<Option<HttpFlow>, PortError>;
     async fn list_by_session(&self, session_id: &str) -> Result<Vec<HttpFlow>, PortError>;
+    /// Deletes every stored flow. Used by the UI's "Clear log" action.
+    async fn clear_all(&self) -> Result<(), PortError>;
 
     async fn save_batch(&self, flows: &[HttpFlow]) -> Result<(), PortError> {
         for flow in flows {
@@ -31,6 +36,8 @@ pub trait FlowRepository: Send + Sync {
 pub trait SessionRepository: Send + Sync {
     async fn save(&self, session: &Session) -> Result<(), PortError>;
     async fn get_by_id(&self, session_id: &str) -> Result<Option<Session>, PortError>;
+    async fn delete(&self, session_id: &str) -> Result<(), PortError>;
+    async fn clear_all(&self) -> Result<(), PortError>;
 }
 
 #[async_trait]
@@ -74,4 +81,49 @@ pub struct HttpResponse {
 #[async_trait]
 pub trait HttpClient: Send + Sync {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, PortError>;
+}
+
+/// Persistence for AI-generated workflows and their runs.
+#[async_trait]
+pub trait WorkflowRepository: Send + Sync {
+    async fn save_version(&self, version: &WorkflowVersion) -> Result<(), PortError>;
+    async fn get_version(&self, id: &str) -> Result<Option<WorkflowVersion>, PortError>;
+    async fn list_versions(&self) -> Result<Vec<WorkflowVersion>, PortError>;
+    async fn save_run(&self, run: &WorkflowRun) -> Result<(), PortError>;
+    async fn update_run(
+        &self,
+        run_id: &str,
+        status: &str,
+        finished_at: Option<chrono::DateTime<chrono::Utc>>,
+        results_json: &str,
+    ) -> Result<(), PortError>;
+    async fn get_run(&self, run_id: &str) -> Result<Option<WorkflowRun>, PortError>;
+    async fn list_runs(&self, version_id: &str) -> Result<Vec<WorkflowRun>, PortError>;
+}
+
+/// Persistence for AI-generated security test plans and runs.
+#[async_trait]
+pub trait SecurityRepository: Send + Sync {
+    async fn save_plan(&self, plan: &SecurityPlan) -> Result<(), PortError>;
+    async fn get_plan(&self, id: &str) -> Result<Option<SecurityPlan>, PortError>;
+    async fn list_plans(&self) -> Result<Vec<SecurityPlan>, PortError>;
+    async fn save_run(&self, run: &SecurityRun) -> Result<(), PortError>;
+    async fn update_run(
+        &self,
+        run_id: &str,
+        status: &str,
+        finished_at: Option<chrono::DateTime<chrono::Utc>>,
+        findings_json: &str,
+    ) -> Result<(), PortError>;
+    async fn get_run(&self, run_id: &str) -> Result<Option<SecurityRun>, PortError>;
+    async fn list_runs(&self, plan_id: &str) -> Result<Vec<SecurityRun>, PortError>;
+}
+
+/// Persistence for sitemap annotations (comment + highlight color), keyed by
+/// `{scheme}://{host}{path}` without query string.
+#[async_trait]
+pub trait AnnotationRepository: Send + Sync {
+    async fn upsert(&self, annotation: &SitemapAnnotation) -> Result<(), PortError>;
+    async fn delete(&self, key: &str) -> Result<(), PortError>;
+    async fn list_all(&self) -> Result<Vec<SitemapAnnotation>, PortError>;
 }
